@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "adapters": [
+    {
+      "id": "orchAgent.hooks.builtin",
+      "type": "builtin",
+      "enabled": true
+    }
+  ],
+  "hooks": [
+    {
+      "id": "orchAgent.session.audit",
+      "adapter": "orchAgent.hooks.builtin",
+      "enabled": true,
+      "events": ["session.start", "session.end"]
+    },
+    {
+      "id": "orchAgent.tool.audit",
+      "adapter": "orchAgent.hooks.builtin",
+      "enabled": true,
+      "events": ["tool.before", "tool.after"]
+    }
+  ]
+}

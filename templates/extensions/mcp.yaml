@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "adapters": [
+    {
+      "id": "orchAgent.mcp.opencode",
+      "type": "opencode",
+      "enabled": true
+    }
+  ],
+  "servers": []
+}

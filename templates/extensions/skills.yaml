@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "adapters": [
+    {
+      "id": "orchAgent.skills.filesystem",
+      "type": "filesystem",
+      "enabled": true,
+      "root": "~/.orchAgent/skills"
+    }
+  ],
+  "skills": []
+}

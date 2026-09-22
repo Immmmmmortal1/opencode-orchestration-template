@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "name": "orchAgent",
+  "core": {
+    "runtimeDir": "~/.orchAgent",
+    "stateDir": "~/.orchAgent/state",
+    "sessionsDir": "~/.orchAgent/sessions",
+    "locksDir": "~/.orchAgent/locks",
+    "leasesDir": "~/.orchAgent/leases",
+    "logsDir": "~/.orchAgent/logs"
+  },
+  "entrypoints": {
+    "agents": "~/.orchAgent/agents.yaml",
+    "workflows": "~/.orchAgent/workflows.yaml"
+  },
+  "extensions": {
+    "hooks": "~/.orchAgent/extensions/hooks.yaml",
+    "skills": "~/.orchAgent/extensions/skills.yaml",
+    "mcp": "~/.orchAgent/extensions/mcp.yaml",
+    "knowledge": "~/.orchAgent/extensions/knowledge.yaml"
+  },
+  "opencode": {
+    "enabled": true,
+    "agentId": "orchAgent",
+    "patchFile": "~/.orchAgent/integrations/opencode.patch.json"
+  },
+  "state": {
+    "schemaVersion": 1,
+    "lockStrategy": "notImplemented",
+    "leaseStrategy": "notImplemented"
+  }
+}

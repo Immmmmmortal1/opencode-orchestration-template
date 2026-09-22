@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "adapters": [
+    {
+      "id": "orchAgent.knowledge.filesystem",
+      "type": "filesystem",
+      "enabled": true,
+      "root": "~/.orchAgent/knowledge"
+    },
+    {
+      "id": "orchAgent.knowledge.lessonsCli",
+      "type": "local_cli",
+      "enabled": false,
+      "command": "python3",
+      "args": ["~/work/_knowledge/lessons.py"]
+    }
+  ],
+  "sources": []
+}

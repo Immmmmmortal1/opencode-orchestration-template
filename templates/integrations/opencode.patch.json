@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "strategy": "merge",
+  "managedBy": "orchAgent-managed",
+  "agentId": "orchAgent",
+  "entry": "~/.orchAgent/orchAgent.yaml"
+}
