@@ -7,6 +7,7 @@ import sys
 from .config import validate_all
 from .doctor import run_doctor
 from .extensions import list_extensions
+from .hooks import doctor_hooks, dry_run_hooks, list_hooks
 from .install import copy_default_configs, rollback_latest
 from .opencode import doctor as opencode_doctor
 from .opencode import link as opencode_link
@@ -74,6 +75,24 @@ def cmd_opencode(args: argparse.Namespace) -> int:
     return 2
 
 
+def cmd_hooks(args: argparse.Namespace) -> int:
+    if args.hooks_cmd == "list":
+        print_json({"status": "ok", "hooks": list_hooks(DEFAULT_HOME)})
+        return 0
+    if args.hooks_cmd == "doctor":
+        ok, result = doctor_hooks(DEFAULT_HOME)
+        print_json({"status": "ok" if ok else "error", "hooks": result})
+        return 0 if ok else 1
+    if args.hooks_cmd == "run":
+        if not args.dry_run:
+            print_json({"status": "error", "message": "hooks run currently supports --dry-run only"})
+            return 1
+        result = dry_run_hooks(args.event, DEFAULT_HOME)
+        print_json({"status": "ok", **result})
+        return 0
+    return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orchagent")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -106,6 +125,15 @@ def build_parser() -> argparse.ArgumentParser:
     open_sub.add_parser("unlink")
     open_sub.add_parser("rollback")
     p_open.set_defaults(func=cmd_opencode)
+
+    p_hooks = sub.add_parser("hooks")
+    hooks_sub = p_hooks.add_subparsers(dest="hooks_cmd", required=True)
+    hooks_sub.add_parser("list")
+    hooks_sub.add_parser("doctor")
+    p_hooks_run = hooks_sub.add_parser("run")
+    p_hooks_run.add_argument("event")
+    p_hooks_run.add_argument("--dry-run", action="store_true")
+    p_hooks.set_defaults(func=cmd_hooks)
     return parser
 
 

@@ -168,3 +168,30 @@ python3 -m compileall orchagent
 结果：通过。
 
 说明：文档本身不改变运行时逻辑，但必须保持与 Phase 1 已实现能力一致。
+
+## Phase 2A：Hooks Dry Run 验证模板
+
+实现 hooks dry-run 后，每次相关改动至少执行：
+
+```bash
+python3 -m compileall orchagent
+
+tmp="$(mktemp -d)"
+ORCHAGENT_HOME="$tmp/home" ./bin/orchagent install --force
+ORCHAGENT_HOME="$tmp/home" ./bin/orchagent config validate
+ORCHAGENT_HOME="$tmp/home" ./bin/orchagent doctor
+ORCHAGENT_HOME="$tmp/home" ./bin/orchagent extensions list --type hooks
+ORCHAGENT_HOME="$tmp/home" ./bin/orchagent hooks list
+ORCHAGENT_HOME="$tmp/home" ./bin/orchagent hooks doctor
+ORCHAGENT_HOME="$tmp/home" ./bin/orchagent hooks run session.start --dry-run
+ORCHAGENT_HOME="$tmp/home" ./bin/orchagent hooks run unknown.event --dry-run
+! ORCHAGENT_HOME="$tmp/home" ./bin/orchagent hooks run session.start
+```
+
+如果修改 disabled 逻辑，还必须覆盖 hook disabled / adapter disabled 场景。
+如果修改 adapter contract，还必须覆盖：
+
+- hook `enabled: "false"`：`hooks doctor` 非 0，`hooks run --dry-run` 不进入 `planned`。
+- adapter `enabled: "false"`：`hooks doctor` 非 0，`hooks run --dry-run` 不进入 `planned`。
+- adapter `type` 为非字符串：`hooks doctor` 非 0，`hooks run --dry-run` 不崩溃且不进入 `planned`。
+- adapter `enabled: false` 且 `type` 非字符串：`hooks doctor` 仍必须非 0，不能把契约错误降级成普通 disabled warning。

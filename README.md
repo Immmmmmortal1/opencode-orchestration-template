@@ -27,6 +27,14 @@ orchagent opencode link
 orchagent opencode doctor
 ```
 
+Hooks dry-run：
+
+```bash
+orchagent hooks list
+orchagent hooks doctor
+orchagent hooks run session.start --dry-run
+```
+
 `opencode doctor` 在未 link 前会返回非 0；先执行 link 再验证。
 
 如需把入口注册到 opencode：

@@ -39,6 +39,8 @@
 
 ## Phase 2A：Adapter Contract + Hooks Dry Run
 
+状态：当前开发阶段。
+
 目标：
 
 - 定义 adapter contract 的参数、返回值、错误语义；

@@ -89,4 +89,14 @@ doctor
 dry-run
 ```
 
+Phase 2A 实际落地范围仅限 hooks dry-run：
+
+```bash
+orchagent hooks list
+orchagent hooks doctor
+orchagent hooks run <event> --dry-run
+```
+
+`run` 未带 `--dry-run` 必须失败，禁止真实执行 hook。
+
 真实执行能力必须晚于 dry-run，并且要有独立验证命令。

@@ -26,12 +26,13 @@ def list_extensions(home: Path = DEFAULT_HOME) -> list[dict[str, Any]]:
             "knowledge": "sources",
         }[kind]
         items = data.get(item_key, [])
+        runtime = "dryRunOnly" if kind == "hooks" else "notImplemented"
         rows.append({
             "type": kind,
             "status": "declared",
             "path": str(path),
             "adapters": len(data.get("adapters", [])),
             "items": len(items),
-            "runtime": "notImplemented",
+            "runtime": runtime,
         })
     return rows

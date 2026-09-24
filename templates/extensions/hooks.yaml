@@ -11,12 +11,14 @@
     {
       "id": "orchAgent.session.audit",
       "adapter": "orchAgent.hooks.builtin",
+      "description": "Dry-run audit hook for session lifecycle events",
       "enabled": true,
       "events": ["session.start", "session.end"]
     },
     {
       "id": "orchAgent.tool.audit",
       "adapter": "orchAgent.hooks.builtin",
+      "description": "Dry-run audit hook for tool lifecycle events",
       "enabled": true,
       "events": ["tool.before", "tool.after"]
     }

@@ -7,4 +7,7 @@
 - mcp
 - knowledge
 
-当前阶段核心只读取注册表并验证声明，不执行 adapter。`extensions list` 中的状态为 `declared`，表示配置已被索引；真正运行时分发会在下一阶段实现。
+当前阶段核心读取注册表并验证声明。`extensions list` 中的状态为 `declared`，表示配置已被索引。
+
+- hooks：Phase 2A 已支持 `dryRunOnly`。
+- skills / mcp / knowledge：仍为 `notImplemented`。
