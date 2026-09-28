@@ -41,13 +41,25 @@ agent 必须通过入口配置找到四类 registry：
 - mcp
 - knowledge
 
-当前阶段只能声明：
+当前运行时状态：
 
 ```text
-declared + runtime:notImplemented
+hooks: dryRunOnly
+knowledge: searchOnly
+skills/mcp: notImplemented
 ```
 
-不得假装 hook 已执行、skill 已加载、MCP 已启动或 knowledge 已索引。
+不得假装 hook 已真实执行、skill 已加载、MCP 已启动或 knowledge 已索引。
+
+Knowledge 仅允许显式搜索：
+
+```bash
+orchagent knowledge list
+orchagent knowledge search "关键词"
+```
+
+filesystem source 必须声明在 `ORCHAGENT_HOME` 内，敏感路径和越界 symlink 不得读取；
+local_cli 默认 disabled，disabled 时不得执行命令或访问用户知识库。
 
 ## 4. 权限规则
 

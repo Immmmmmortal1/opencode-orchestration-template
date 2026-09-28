@@ -45,9 +45,13 @@ Core 只负责：
 
 具体能力后续通过 adapter contract 接入。
 
-## D4. Extension 当前只声明，不执行
+## D4. Extension 状态必须准确反映能力边界
 
-当前 `extensions list` 返回 `declared`，表示配置被识别，但 runtime 尚未执行。
+`extensions list` 返回 `declared`，表示配置被识别；`runtime` 必须准确表达当前能力：
+
+- hooks：`dryRunOnly`
+- knowledge：`searchOnly`
+- skills / MCP：`notImplemented`
 
 禁止把声明状态叫做：
 
@@ -55,6 +59,8 @@ Core 只负责：
 - active；
 - running；
 - executed。
+
+`searchOnly` 不代表 knowledge 已被索引、缓存或自动注入上下文。
 
 ## D5. opencode 集成必须最小权限
 
@@ -112,3 +118,20 @@ rollback 要求：
 5. 当前代码实现
 
 当代码与文档冲突时，先暂停并让用户确认，不要自行扩展。
+
+## D10. Knowledge 适配器的威胁模型边界
+
+用户已确认（2026-09-24）knowledge adapter 的安全范围是：
+
+- 防误读：不默认访问用户知识库、不读取敏感名称、不跟随 symlink、不越出 `ORCHAGENT_HOME`。
+- 防竞态：校验后路径被替换成越界 symlink 时，读取必须失败（`O_NOFOLLOW` + `fstat`）。
+- 防链接伪装：`st_nlink > 1` 直接 fail-closed。
+
+明确不在范围内（视为已知非目标，不再重开）：
+
+- 假设"攻击者已经可以任意改写 `ORCHAGENT_HOME` 目录内容"的对抗模型，例如父目录被替换、
+  子进程 `setsid`/`setpgid` 逃逸进程组。该前提下的攻击者本就能直接读取系统任意文件，
+  `knowledge` adapter 不是该场景的安全边界。
+
+后续若要升级为上述强对抗模型，必须由用户重新确认 roadmap 并单独立项（如 `openat` 逐级打开、
+`selectors` 有界读取），不得在普通改动中顺手引入。

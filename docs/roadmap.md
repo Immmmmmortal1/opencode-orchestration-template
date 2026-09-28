@@ -39,7 +39,7 @@
 
 ## Phase 2A：Adapter Contract + Hooks Dry Run
 
-状态：当前开发阶段。
+状态：已实现并验证通过。
 
 目标：
 
@@ -62,6 +62,8 @@ orchagent hooks run session.start --dry-run
 
 ## Phase 2B：Knowledge Adapter
 
+状态：已实现最小闭环并通过本地验证，待独立审查。
+
 目标：
 
 - filesystem knowledge provider；
@@ -79,6 +81,8 @@ orchagent knowledge search "关键词"
 - 不读取 secrets；
 - 不默认访问用户知识库；
 - 搜索失败不阻断 core doctor。
+- filesystem 只读取 `ORCHAGENT_HOME` 内显式声明的普通文本文件；
+- registry 契约非法时不执行任何 provider。
 
 ## Phase 2C：MCP / Skills Registry 校验
 

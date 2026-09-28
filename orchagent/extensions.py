@@ -19,6 +19,16 @@ def list_extensions(home: Path = DEFAULT_HOME) -> list[dict[str, Any]]:
             rows.append({"type": kind, "status": "missing", "path": str(path)})
             continue
         data = read_text_config(path)
+        if not isinstance(data, dict):
+            # registry 根节点必须是对象；其它合法 JSON（[]/null/字符串等）fail-closed，
+            # 不能让扩展列表因为畸形配置直接抛异常。
+            rows.append({
+                "type": kind,
+                "status": "error",
+                "path": str(path),
+                "reason": "registry root must be an object",
+            })
+            continue
         item_key = {
             "hooks": "hooks",
             "skills": "skills",
@@ -26,7 +36,10 @@ def list_extensions(home: Path = DEFAULT_HOME) -> list[dict[str, Any]]:
             "knowledge": "sources",
         }[kind]
         items = data.get(item_key, [])
-        runtime = "dryRunOnly" if kind == "hooks" else "notImplemented"
+        runtime = {
+            "hooks": "dryRunOnly",
+            "knowledge": "searchOnly",
+        }.get(kind, "notImplemented")
         rows.append({
             "type": kind,
             "status": "declared",

@@ -4,8 +4,7 @@
     {
       "id": "orchAgent.knowledge.filesystem",
       "type": "filesystem",
-      "enabled": true,
-      "root": "~/.orchAgent/knowledge"
+      "enabled": true
     },
     {
       "id": "orchAgent.knowledge.lessonsCli",

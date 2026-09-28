@@ -70,13 +70,16 @@ extensions/mcp.yaml
 extensions/knowledge.yaml
 ```
 
-当前阶段状态为：
+当前运行时状态为：
 
 ```text
-declared + runtime:notImplemented
+hooks: declared + runtime:dryRunOnly
+knowledge: declared + runtime:searchOnly
+skills/mcp: declared + runtime:notImplemented
 ```
 
-含义：配置已被索引和校验，但 adapter 尚未真正执行。任何实现不得把 `declared` 伪装成已运行。
+含义：配置已被索引和校验；hooks 只做 dry-run，knowledge 只允许显式 list/search，
+skills/MCP 尚未执行。任何实现不得把 `declared` 伪装成已运行。
 
 ## 5. 安装与回滚模型
 
@@ -132,7 +135,8 @@ declared + runtime:notImplemented
 
 - 真正的多 agent 调度引擎；
 - hooks 的真实业务执行；
-- skills/MCP/knowledge 的运行时分发；
+- skills/MCP 的运行时分发；
+- knowledge 的索引、缓存或自动检索；
 - 远程 marketplace；
 - 凭据管理；
 - 自动迁移现有 orchestrator。

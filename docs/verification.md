@@ -195,3 +195,41 @@ ORCHAGENT_HOME="$tmp/home" ./bin/orchagent hooks run unknown.event --dry-run
 - adapter `enabled: "false"`：`hooks doctor` 非 0，`hooks run --dry-run` 不进入 `planned`。
 - adapter `type` 为非字符串：`hooks doctor` 非 0，`hooks run --dry-run` 不崩溃且不进入 `planned`。
 - adapter `enabled: false` 且 `type` 非字符串：`hooks doctor` 仍必须非 0，不能把契约错误降级成普通 disabled warning。
+
+## Phase 2B：Knowledge Adapter 验证模板
+
+```bash
+python3 -m compileall orchagent
+
+tmp="$(mktemp -d)"
+ORCHAGENT_HOME="$tmp/home" ./bin/orchagent install --force
+ORCHAGENT_HOME="$tmp/home" ./bin/orchagent extensions list --type knowledge
+ORCHAGENT_HOME="$tmp/home" ./bin/orchagent knowledge list
+ORCHAGENT_HOME="$tmp/home" ./bin/orchagent knowledge search "关键词"
+```
+
+还必须在隔离 home 覆盖：
+
+- filesystem source 位于 home 内时可搜索 `.md/.txt/.json/.yaml/.yml`；
+- source 使用绝对越界路径、`..` 越界、敏感路径片段或越界 symlink 时不读取；
+- `secrets.json`、`api-keys.md`、`accounts.yaml` 以及点号前首段为敏感名的文件均进入 `skipped`；
+- `.accounts.yaml`、`.api-keys.md` 等带前导点的隐藏敏感文件同样进入 `skipped`；
+- 校验通过后被替换成越界 symlink 的文件不会跟随读取（`O_NOFOLLOW` + `fstat`）；
+- `st_nlink > 1` 的硬链接文件进入 `skipped`，不读取；
+- local_cli 非零退出时 stderr 只回显前 500 字符，避免把 provider 输出整段落进 JSON；
+- 若 reader 线程在整组清理后仍未退出，会关闭父端管道并返回清理失败，不静默继续；
+- lessonsCli/local_cli disabled 时只进入 `skipped`，不执行命令；
+- adapter 的 `id/type/enabled` 非法或 adapters/sources 非 list 时返回 error，且不执行 provider；
+- registry 根节点为 `[]`、`null`、字符串或数字时返回结构化 error，不抛异常；
+- registry 根节点非法时 `orchagent extensions list --type knowledge` 也返回结构化 error 行，不抛异常；
+- 启用的 local_cli 耗时超过 5 秒但成功时，filesystem source 仍获得完整的 5 秒遍历预算；
+- adapter `id` 或 source `id` 重复时返回 error；
+- 路径链中间段是 symlink（如 `alias/file.md`，`alias` 指向 home 内目录）时进入 `skipped`；
+- local_cli enabled 但命令不存在、超时或返回非 0 时进入 `errors`，命令失败不导致 CLI 崩溃。
+- local_cli 分别让 stdout、stderr 超过 64,000 bytes：子进程被终止，`errors` 指明超限流，且进程无残留；
+- local_cli 派生继承管道的孙进程后退出：整组被 `killpg` 清理，reader 线程不遗留；
+- local_cli 仍以 argv 执行，query 中 shell 元字符不会触发 shell 展开；
+- 空查询返回 error；超大文件、结果数量和输出长度按限制截断或跳过；
+- 无命中的深/宽目录分别触发 10,000 entry、2,000 候选文件或 5 秒 deadline 时停止遍历，`skipped` 写明原因；
+- 多个合法小文件累计读取达到 10,000,000 bytes 时停止读取，`skipped` 写明累计字节上限。
+- 多个 filesystem source 共享扫描 deadline、entry/file 和累计读取字节预算，不能逐 source 重置。

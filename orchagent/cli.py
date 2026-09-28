@@ -9,6 +9,7 @@ from .doctor import run_doctor
 from .extensions import list_extensions
 from .hooks import doctor_hooks, dry_run_hooks, list_hooks
 from .install import copy_default_configs, rollback_latest
+from .knowledge import list_knowledge, search_knowledge
 from .opencode import doctor as opencode_doctor
 from .opencode import link as opencode_link
 from .opencode import unlink as opencode_unlink
@@ -93,6 +94,17 @@ def cmd_hooks(args: argparse.Namespace) -> int:
     return 2
 
 
+def cmd_knowledge(args: argparse.Namespace) -> int:
+    if args.knowledge_cmd == "list":
+        result = list_knowledge(DEFAULT_HOME)
+    elif args.knowledge_cmd == "search":
+        result = search_knowledge(args.query, DEFAULT_HOME)
+    else:
+        return 2
+    print_json(result)
+    return 0 if result.get("status") == "ok" else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orchagent")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -134,6 +146,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_hooks_run.add_argument("event")
     p_hooks_run.add_argument("--dry-run", action="store_true")
     p_hooks.set_defaults(func=cmd_hooks)
+
+    p_knowledge = sub.add_parser("knowledge")
+    knowledge_sub = p_knowledge.add_subparsers(dest="knowledge_cmd", required=True)
+    knowledge_sub.add_parser("list")
+    p_knowledge_search = knowledge_sub.add_parser("search")
+    p_knowledge_search.add_argument("query")
+    p_knowledge.set_defaults(func=cmd_knowledge)
     return parser
 
 
