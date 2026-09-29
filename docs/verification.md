@@ -269,3 +269,40 @@ python3 -m unittest discover -s tests
 
 - 同一秒同一进程内连续调用安装/opencode 备份不再 `FileExistsError`（原违反“安装幂等”契约）；
 - `latest_backup_dir()` 在同 `createdAt` 时按 `createdAtNs` / `sequence` / 目录名确定性选择最新备份。
+
+## Phase 2C：MCP / Skills Registry 校验验证
+
+运行：
+
+```bash
+python3 -m unittest discover -s tests
+
+tmp="$(mktemp -d)"
+ORCHAGENT_HOME="$tmp/home" OPENCODE_CONFIG="$tmp/oc.json" ./bin/orchagent install --force
+ORCHAGENT_HOME="$tmp/home" OPENCODE_CONFIG="$tmp/oc.json" ./bin/orchagent mcp list
+ORCHAGENT_HOME="$tmp/home" OPENCODE_CONFIG="$tmp/oc.json" ./bin/orchagent mcp doctor
+ORCHAGENT_HOME="$tmp/home" OPENCODE_CONFIG="$tmp/oc.json" ./bin/orchagent skills list
+ORCHAGENT_HOME="$tmp/home" OPENCODE_CONFIG="$tmp/oc.json" ./bin/orchagent skills doctor
+```
+
+覆盖矩阵：
+
+| 文件 | 覆盖 |
+|---|---|
+| `tests/test_mcp.py` | registry 根节点、adapter、server 三层契约 fail-closed 与未知字段拒绝、`type=http` 拒绝、local/remote 必填与互斥字段、非法 registry 根节点、合法配置、`runtime=notImplemented`、敏感 header 值不回显、**不启动进程**（mock `Popen` 未调用 + marker 未生成） |
+| `tests/test_skills.py` | adapter/skill 条目契约、root 与 path 的 `ORCHAGENT_HOME` 边界、`..` 越界、敏感名、中间段 symlink、`SKILL.md` 受限 frontmatter（name/description 非空、null/注释/带行内注释的 null/内部未转义引号/未闭合引号/block scalar 拒绝、加引号 `"null"` 保留为字面量、CRLF、半截 frontmatter、非 UTF-8）、空 skills 时 root 缺失仅 warn、**不创建目录/不写文件**、不回显 description 全文 |
+| `tests/test_cli_smoke.py` | `mcp list|doctor`、`skills list|doctor` 端到端返回码与 JSON |
+
+验证结果：`python3 -m unittest discover -s tests` 全部通过（Phase 2B.1 的 70 个用例
++ Phase 2C 新增用例，总数 117）。
+
+变异验证（故意破坏业务代码，验证后已还原并复绿）：
+
+- 放开 `type=http`（历史坑回归）→ `tests.test_mcp` 转红；
+- 去掉未知字段拒绝 → `tests.test_mcp` 转红；
+- 去掉 skills 的 home 边界检查 → `tests.test_skills` 转红。
+
+不启动 / 不安装的可测证明：
+
+- MCP：local server 的 `command` 指向写 marker 的脚本，跑完 `list` + `doctor` 后 marker 不存在；并 mock `subprocess.Popen` 断言未被调用。
+- Skills：`root` 不存在时跑 `list` + `doctor`，断言 `root` 仍不存在（未 mkdir）。

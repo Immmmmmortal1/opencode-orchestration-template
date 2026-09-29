@@ -26,6 +26,13 @@ class CliSmokeTests(unittest.TestCase):
         self.assertEqual("ok", payload["status"])
         return payload
 
+    def assert_success_json(self, *args: str) -> dict[str, Any]:
+        """断言命令成功并返回 JSON，不要求 payload 带 status 字段。"""
+        code, payload, _, stderr = self.env.run_cli(*args)
+        self.assertEqual(0, code, f"{' '.join(args)}: {stderr}")
+        self.assertIsInstance(payload, dict, f"{' '.join(args)} 未返回 JSON")
+        return payload
+
     def test_full_cli_smoke_flow(self) -> None:
         self.assert_ok("install", "--force")
         self.assert_ok("config", "validate")
@@ -48,6 +55,28 @@ class CliSmokeTests(unittest.TestCase):
 
         self.assert_ok("knowledge", "list")
         self.assert_ok("knowledge", "search", "关键词")
+
+        self.assert_ok("mcp", "list")
+        self.assert_success_json("mcp", "doctor")
+
+        # 隔离环境使用相对 root，避免默认的用户目录写法逃逸 ORCHAGENT_HOME。
+        self.env.write_registry(
+            "skills",
+            {
+                "version": 1,
+                "adapters": [
+                    {
+                        "id": "orchAgent.skills.filesystem",
+                        "type": "filesystem",
+                        "enabled": True,
+                        "root": "skills",
+                    }
+                ],
+                "skills": [],
+            },
+        )
+        self.assert_ok("skills", "list")
+        self.assert_success_json("skills", "doctor")
 
         self.assert_ok("opencode", "link")
         self.assert_ok("opencode", "doctor")

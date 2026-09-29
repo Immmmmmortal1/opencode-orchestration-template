@@ -101,12 +101,30 @@ orchagent knowledge search "关键词"
 
 ## Phase 2C：MCP / Skills Registry 校验
 
+状态：已实现并通过本地验证，待独立审查。详见 [`mcp.md`](mcp.md) / [`skills.md`](skills.md)。
+
 目标：
 
 - 校验 MCP server 声明；
 - 校验 skills 路径；
 - 不自动启动 MCP；
 - 不自动安装第三方 skill。
+
+命令：
+
+```bash
+orchagent mcp list|doctor
+orchagent skills list|doctor
+```
+
+验收：
+
+- MCP server `type` 只允许 `local` / `remote`，显式拒绝 `http`；
+- 未知字段被拒绝（防 typo 静默忽略）；
+- 校验过程不启动任何进程、不发网络请求（有静态检查与进程未启动断言证明）；
+- skills 路径解析后必须仍在 `ORCHAGENT_HOME` 内，symlink 与敏感名 fail-closed；
+- 校验不创建目录、不写文件（有测试证明）；
+- `runtime` 恒为 `notImplemented`，不得宣称已运行。
 
 前置条件：
 

@@ -10,10 +10,12 @@ from .extensions import list_extensions
 from .hooks import doctor_hooks, dry_run_hooks, list_hooks
 from .install import copy_default_configs, rollback_latest
 from .knowledge import list_knowledge, search_knowledge
+from .mcp import doctor_mcp, list_mcp
 from .opencode import doctor as opencode_doctor
 from .opencode import link as opencode_link
 from .opencode import unlink as opencode_unlink
 from .paths import DEFAULT_HOME
+from .skills import doctor_skills, list_skills
 
 
 def print_json(data: object) -> None:
@@ -105,6 +107,30 @@ def cmd_knowledge(args: argparse.Namespace) -> int:
     return 0 if result.get("status") == "ok" else 1
 
 
+def cmd_mcp(args: argparse.Namespace) -> int:
+    if args.mcp_cmd == "list":
+        result = list_mcp(DEFAULT_HOME)
+        print_json(result)
+        return 0 if result.get("status") == "ok" else 1
+    if args.mcp_cmd == "doctor":
+        ok, result = doctor_mcp(DEFAULT_HOME)
+        print_json(result)
+        return 0 if ok else 1
+    return 2
+
+
+def cmd_skills(args: argparse.Namespace) -> int:
+    if args.skills_cmd == "list":
+        result = list_skills(DEFAULT_HOME)
+        print_json(result)
+        return 0 if result.get("status") == "ok" else 1
+    if args.skills_cmd == "doctor":
+        ok, result = doctor_skills(DEFAULT_HOME)
+        print_json(result)
+        return 0 if ok else 1
+    return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orchagent")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -153,6 +179,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_knowledge_search = knowledge_sub.add_parser("search")
     p_knowledge_search.add_argument("query")
     p_knowledge.set_defaults(func=cmd_knowledge)
+
+    p_mcp = sub.add_parser("mcp")
+    mcp_sub = p_mcp.add_subparsers(dest="mcp_cmd", required=True)
+    mcp_sub.add_parser("list")
+    mcp_sub.add_parser("doctor")
+    p_mcp.set_defaults(func=cmd_mcp)
+
+    p_skills = sub.add_parser("skills")
+    skills_sub = p_skills.add_subparsers(dest="skills_cmd", required=True)
+    skills_sub.add_parser("list")
+    skills_sub.add_parser("doctor")
+    p_skills.set_defaults(func=cmd_skills)
     return parser
 
 

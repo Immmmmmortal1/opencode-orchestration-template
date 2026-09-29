@@ -111,4 +111,20 @@ orchagent hooks run <event> --dry-run
 
 `run` 未带 `--dry-run` 必须失败，禁止真实执行 hook。
 
-真实执行能力必须晚于 dry-run，并且要有独立验证命令。
+Phase 2C 增加了 MCP / Skills 的只读校验：
+
+```bash
+orchagent mcp list
+orchagent mcp doctor
+orchagent skills list
+orchagent skills doctor
+```
+
+约束：
+
+- MCP 校验**不启动、不连接、不探活**任何 MCP server；
+- Skills 校验**不下载、不安装、不创建目录、不写文件**；
+- 两者 `runtime` 均为 `notImplemented`，不得当作"已加载/已运行"；
+- skills 路径必须留在 `ORCHAGENT_HOME` 内，symlink 与敏感名 fail-closed。
+
+真实执行能力必须晚于 dry-run / 只读校验，并且要有独立验证命令。

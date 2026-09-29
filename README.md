@@ -35,6 +35,10 @@ orchagent hooks doctor
 orchagent hooks run session.start --dry-run
 orchagent knowledge list
 orchagent knowledge search "关键词"
+orchagent mcp list
+orchagent mcp doctor
+orchagent skills list
+orchagent skills doctor
 ```
 
 `opencode doctor` 在未 link 前会返回非 0；先执行 link 再验证。
