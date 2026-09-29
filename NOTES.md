@@ -30,11 +30,31 @@
 | v0.1.1 | 架构设计文档落盘 |
 | v0.2.0 | Phase 2A hooks dry-run |
 | v0.3.0 | Phase 2B knowledge list/search |
+| v0.3.1 | 项目记忆 NOTES.md |
+| v0.4.0 | Phase 2B.1 测试基建（标准库 unittest 回归测试套件）|
 
 - Phase 1 安装闭环：`install` / `rollback` / `doctor` / `config validate` / `extensions list` / `opencode link|unlink|rollback`
 - Phase 2A：`hooks list` / `hooks doctor` / `hooks run <event> --dry-run`（未带 `--dry-run` 必须失败）
 - Phase 2B：`knowledge list` / `knowledge search <query>`
+- Phase 2B.1：`tests/` 正式回归测试套件
 - 未实现：skills/MCP runtime、knowledge 索引、Phase 3 编排运行时
+
+## 测试
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+- 标准库 `unittest`，**零第三方依赖**
+- 全部在临时目录内运行（隔离 `ORCHAGENT_HOME` / `OPENCODE_CONFIG` / `HOME`），不触碰真实
+  `~/.orchAgent`、真实 opencode 配置、`~/work/_knowledge`、secrets
+- 覆盖矩阵与变异验证记录见 `docs/verification.md` 的「Phase 2B.1」章节
+- 改任何业务代码后必须先跑全量测试
+
+## 已知缺口 / 待办
+
+- [ ] Phase 2C：MCP / Skills registry 校验（不自动启动 MCP、不自动装第三方 skill）
+- [ ] Phase 3：编排运行时（前置条件见 `docs/roadmap.md`）
 
 ## 开发流程约束
 
@@ -42,12 +62,6 @@
 - 本项目 review backend 已配项目级 `agent/openai-reviewer`：`.dev-flow/review-backend.local.json`（**已被 gitignore，不入库**）
 - `.dev-flow/` 为本地会话/配置状态，已被 `.gitignore` 忽略
 - 发布纪律：**任何 push 必须打注解 tag**（feat 升 minor，fix/docs 升 patch）
-
-## 已知缺口 / 待办
-
-- [ ] **无自动化测试套件**：`tests/` 为空。Phase 2A/2B 的验证都是临时 harness（隔离 `ORCHAGENT_HOME` + 直调模块），跑完即弃、不可回归。下一步应补正式测试（建议 pytest 或纯 stdlib `unittest`，覆盖 hooks dry-run、knowledge 路径授权与 fail-closed 场景）。
-- [ ] Phase 2C：MCP / Skills registry 校验（不自动启动 MCP、不自动装第三方 skill）
-- [ ] Phase 3：编排运行时（前置条件见 `docs/roadmap.md`）
 
 ## 参考内容（未引入）
 

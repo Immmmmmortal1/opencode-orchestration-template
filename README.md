@@ -58,3 +58,21 @@ orchagent install rollback
 - 不复用现有 orchestrator 名称、目录、配置或状态。
 - opencode 侧只注册 `orchAgent` 入口。
 - 不写入 API Key、账号、服务器或其他敏感信息。
+
+## 运行测试
+
+测试使用 Python 标准库 `unittest`，**零第三方依赖**：
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+单个文件：
+
+```bash
+python3 -m unittest tests.test_knowledge
+```
+
+测试全部在临时目录内运行（隔离 `ORCHAGENT_HOME` / `OPENCODE_CONFIG` / `HOME`），
+不会触碰真实 `~/.orchAgent`、真实 opencode 配置、`~/work/_knowledge` 或任何 secrets。
+覆盖范围见 [`docs/verification.md`](docs/verification.md)。

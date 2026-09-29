@@ -84,6 +84,21 @@ orchagent knowledge search "关键词"
 - filesystem 只读取 `ORCHAGENT_HOME` 内显式声明的普通文本文件；
 - registry 契约非法时不执行任何 provider。
 
+## Phase 2B.1：测试基建
+
+状态：已实现。
+
+目标：
+
+- 基于标准库 `unittest` 的回归测试套件（零第三方依赖）；
+- 覆盖 Phase 1 安装/回滚/symlink 安全、Phase 2A hooks dry-run、Phase 2B knowledge 授权边界；
+- 全部在隔离临时目录运行，不触碰真实用户目录。
+
+验收：
+
+- `python3 -m unittest discover -s tests` 全绿；
+- 变异验证（故意破坏业务代码）能转红，证明测试有效。
+
 ## Phase 2C：MCP / Skills Registry 校验
 
 目标：
@@ -92,6 +107,10 @@ orchagent knowledge search "关键词"
 - 校验 skills 路径；
 - 不自动启动 MCP；
 - 不自动安装第三方 skill。
+
+前置条件：
+
+- 测试套件全绿。
 
 ## Phase 3：编排运行时
 
@@ -108,4 +127,5 @@ orchagent knowledge search "关键词"
 
 - Phase 2 adapters 已可 dry-run；
 - session/lock/lease 设计已落盘并通过测试；
-- review 包构造规则已固化。
+- review 包构造规则已固化；
+- 测试套件全绿。

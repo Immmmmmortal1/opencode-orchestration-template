@@ -233,3 +233,39 @@ ORCHAGENT_HOME="$tmp/home" ./bin/orchagent knowledge search "关键词"
 - 无命中的深/宽目录分别触发 10,000 entry、2,000 候选文件或 5 秒 deadline 时停止遍历，`skipped` 写明原因；
 - 多个合法小文件累计读取达到 10,000,000 bytes 时停止读取，`skipped` 写明累计字节上限。
 - 多个 filesystem source 共享扫描 deadline、entry/file 和累计读取字节预算，不能逐 source 重置。
+
+## Phase 2B.1：正式测试套件（标准库 unittest）
+
+运行：
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+隔离原则：
+
+- 每个用例在 `tempfile.TemporaryDirectory()` 内运行，通过 `tests/helpers.py` 的 `IsolatedEnv`
+  显式注入 `ORCHAGENT_HOME` / `OPENCODE_CONFIG` / `HOME`，不触碰真实 `~/.orchAgent`、
+  真实 opencode 配置、`~/work/_knowledge` 或 secrets；
+- 业务函数直传 `home=`；CLI 层用 subprocess 调 `bin/orchagent`。
+
+覆盖矩阵：
+
+| 文件 | 覆盖 |
+|---|---|
+| `tests/test_install_opencode.py` | 安装幂等、备份目录位置（D8）、install rollback 一次性、opencode link/doctor/unlink/rollback 闭环、`OPENCODE_CONFIG` 强隔离（D6：默认两路径 byte-for-byte 不变且不被扫描）、symlink/dangling symlink、未托管字段拒绝覆盖 |
+| `tests/test_extensions.py` | 四类 runtime 状态（hooks=dryRunOnly / knowledge=searchOnly / skills,mcp=notImplemented）、`--type` 过滤、非对象 registry fail-closed、registry 缺失 |
+| `tests/test_hooks.py` | 默认 list/doctor、run --dry-run planned/skipped、未匹配 event、非法 enabled/type fail-closed、disabled adapter 不掩盖非法 type、unsupported type、未带 `--dry-run` 拒绝、dry-run 无副作用 |
+| `tests/test_knowledge.py` | registry 契约 fail-closed、越界/敏感名（含前导点）/中间段 symlink/硬链接拦截、预算限制（单文件/结果数/行宽/entry/file/累计字节）与多 source 共享预算、local_cli disabled 未执行（marker 证明）、输出超限、超时、argv 无 shell 展开、慢 local_cli 不吃 filesystem 预算 |
+| `tests/test_cli_smoke.py` | 核心命令端到端返回码与 JSON 契约 |
+
+测试有效性验证（变异测试，验证后会还原）：
+
+- `hooks run` 去掉 `--dry-run` 强制失败 → `test_hooks` 转红；
+- 去掉敏感名判断的 `lstrip(".")` → `test_knowledge` 转红；
+- `OPENCODE_CONFIG` 存在时仍追加默认配置路径 → `test_install_opencode` 转红。
+
+新增回归场景（由测试基建期间发现并修复）：
+
+- 同一秒同一进程内连续调用安装/opencode 备份不再 `FileExistsError`（原违反“安装幂等”契约）；
+- `latest_backup_dir()` 在同 `createdAt` 时按 `createdAtNs` / `sequence` / 目录名确定性选择最新备份。
