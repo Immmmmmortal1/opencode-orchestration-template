@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import time
 from pathlib import Path
 from typing import Any
 
+from .backup import create_backup_dir
 from .paths import DEFAULT_HOME
 
 
@@ -70,8 +70,7 @@ def backup_files(paths: list[Path], home: Path = DEFAULT_HOME) -> Path:
     root = home.parent / f"{home.name}.backups"
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(root, 0o700)
-    backup_dir = root / f"opencode-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
-    backup_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
+    backup_dir, created_at_ns, sequence = create_backup_dir(root, "opencode")
     files = []
     for path in paths:
         if path.is_symlink():
@@ -100,7 +99,14 @@ def backup_files(paths: list[Path], home: Path = DEFAULT_HOME) -> Path:
         shutil.copyfile(path, backup_path)
         os.chmod(backup_path, 0o600)
         files.append({"target": str(path), "backup": str(backup_path), "existed": True})
-    manifest = {"version": 1, "kind": "opencode", "createdAt": int(time.time()), "files": files}
+    manifest = {
+        "version": 1,
+        "kind": "opencode",
+        "createdAt": created_at_ns // 1_000_000_000,
+        "createdAtNs": created_at_ns,
+        "sequence": sequence,
+        "files": files,
+    }
     manifest_path = backup_dir / "rollback-manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     os.chmod(manifest_path, 0o600)

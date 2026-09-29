@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
+from .backup import create_backup_dir
 from .paths import DEFAULT_HOME, PROJECT_ROOT, template_path
 
 
@@ -19,6 +22,21 @@ RUNTIME_DIRS = [
     "logs",
     "backups",
 ]
+
+
+@dataclass(frozen=True)
+class BackupCandidate:
+    """可参与“最新备份”排序的合法候选。"""
+
+    created_at: int
+    created_at_ns: int
+    sequence: int
+    directory_name: str
+    path: Path
+
+    @property
+    def sort_key(self) -> tuple[int, int, int, str]:
+        return (self.created_at, self.created_at_ns, self.sequence, self.directory_name)
 
 
 def backup_root(home: Path = DEFAULT_HOME) -> Path:
@@ -49,13 +67,6 @@ def write_rendered_template(src: Path, dst: Path, home: Path) -> None:
     os.chmod(dst, 0o600)
 
 
-def _ensure_backup_dir(home: Path, backup_dir: Path, created: bool) -> bool:
-    if not created:
-        backup_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
-        os.chmod(backup_dir, 0o700)
-    return True
-
-
 def copy_default_configs(home: Path = DEFAULT_HOME, overwrite: bool = False, link_bin: str | None = None) -> list[str]:
     if link_bin:
         link_path = Path(link_bin).expanduser()
@@ -78,25 +89,21 @@ def copy_default_configs(home: Path = DEFAULT_HOME, overwrite: bool = False, lin
     root = backup_root(home)
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(root, 0o700)
-    backup_dir = root / f"install-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
-    backup_created = False
+    backup_dir, created_at_ns, sequence = create_backup_dir(root, "install")
     for src, dst in mappings:
         if dst.exists():
             if not overwrite:
                 continue
-            backup_created = _ensure_backup_dir(home, backup_dir, backup_created)
             backup_path = backup_dir / dst.name
             shutil.copyfile(dst, backup_path)
             os.chmod(backup_path, 0o600)
             manifest_entries.append({"type": "file", "target": str(dst), "backup": str(backup_path), "existed": True})
         else:
-            backup_created = _ensure_backup_dir(home, backup_dir, backup_created)
             manifest_entries.append({"type": "file", "target": str(dst), "backup": "", "existed": False})
         write_rendered_template(src, dst, home)
         copied.append(str(dst))
 
     install_manifest_path = home / "install-manifest.json"
-    backup_created = _ensure_backup_dir(home, backup_dir, backup_created)
     if install_manifest_path.exists():
         backup_path = backup_dir / "install-manifest.json"
         shutil.copyfile(install_manifest_path, backup_path)
@@ -131,7 +138,14 @@ def copy_default_configs(home: Path = DEFAULT_HOME, overwrite: bool = False, lin
     install_manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     os.chmod(install_manifest_path, 0o600)
 
-    rollback_manifest = {"version": 1, "kind": "install", "createdAt": int(time.time()), "files": manifest_entries}
+    rollback_manifest = {
+        "version": 1,
+        "kind": "install",
+        "createdAt": created_at_ns // 1_000_000_000,
+        "createdAtNs": created_at_ns,
+        "sequence": sequence,
+        "files": manifest_entries,
+    }
     rollback_path = backup_dir / "rollback-manifest.json"
     rollback_path.write_text(json.dumps(rollback_manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     os.chmod(rollback_path, 0o600)
@@ -140,23 +154,58 @@ def copy_default_configs(home: Path = DEFAULT_HOME, overwrite: bool = False, lin
 
 def latest_backup_dir(home: Path = DEFAULT_HOME, kind: str | None = None) -> Path | None:
     backups = backup_root(home)
-    if not backups.exists():
+    try:
+        backups.stat()
+    except FileNotFoundError:
         return None
-    dirs = []
-    for path in backups.iterdir():
-        if not path.is_dir():
+    try:
+        backup_paths = list(backups.iterdir())
+    except FileNotFoundError:
+        return None
+    candidates: list[BackupCandidate] = []
+    for path in backup_paths:
+        try:
+            path_stat = path.stat()
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISDIR(path_stat.st_mode):
             continue
         manifest_path = path / "rollback-manifest.json"
-        if not manifest_path.exists():
+        try:
+            manifest_text = manifest_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
             continue
         try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001
+            manifest = json.loads(manifest_text)
+            if not isinstance(manifest, dict):
+                continue
+            if kind is not None and manifest.get("kind") != kind:
+                continue
+            created_at_ns_value = (
+                manifest["createdAtNs"]
+                if "createdAtNs" in manifest
+                else manifest_path.stat().st_mtime_ns
+            )
+            created_at_ns = int(created_at_ns_value)
+            sequence = int(manifest.get("sequence", 0))
+            created_at = int(manifest.get("createdAt", 0))
+        except FileNotFoundError:
             continue
-        if kind is None or manifest.get("kind") == kind:
-            dirs.append((int(manifest.get("createdAt", 0)), path))
-    dirs = sorted(dirs, reverse=True)
-    return dirs[0][1] if dirs else None
+        except (json.JSONDecodeError, TypeError, ValueError):
+            # 单个损坏备份不能阻断其它合法候选的回滚。
+            continue
+        candidates.append(
+            BackupCandidate(
+                created_at=created_at,
+                created_at_ns=created_at_ns,
+                sequence=sequence,
+                directory_name=path.name,
+                path=path,
+            )
+        )
+    if not candidates:
+        return None
+    return max(candidates, key=lambda candidate: candidate.sort_key).path
 
 
 def rollback_latest(home: Path = DEFAULT_HOME, kind: str | None = "install") -> list[str]:
