@@ -57,6 +57,10 @@ orchAgent
     └── backups / rollback manifests
 ```
 
+`sessions` / `locks` / `leases` 的权威协议见
+[`session-lock-lease.md`](session-lock-lease.md)（设计决策 D11）；本阶段只落协议与最小原语，
+不实现 workflow / dispatch / monitor。
+
 ## 4. Core 与 Extension Registry
 
 Core 只认识 registry，不写死具体实现。

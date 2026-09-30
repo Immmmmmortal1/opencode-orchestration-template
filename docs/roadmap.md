@@ -143,7 +143,10 @@ orchagent skills list|doctor
 
 前置条件：
 
-- Phase 2 adapters 已可 dry-run；
-- session/lock/lease 设计已落盘并通过测试；
-- review 包构造规则已固化；
-- 测试套件全绿。
+- Phase 2 adapters 已可 dry-run ✅
+- review 包构造规则已固化 ✅（dev-flow）
+- 测试套件全绿 ✅
+- session/lock/lease 设计已落盘并通过测试 ✅（见 [`session-lock-lease.md`](session-lock-lease.md) 与 D11）
+
+> Phase 3 本体（workflow/state machine、agent dispatch、monitor、verify、review handoff、
+> result aggregation）尚未开始；上述前置已完成，进入 Phase 3 前需先确认其范围边界。

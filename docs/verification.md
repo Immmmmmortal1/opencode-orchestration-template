@@ -306,3 +306,50 @@ ORCHAGENT_HOME="$tmp/home" OPENCODE_CONFIG="$tmp/oc.json" ./bin/orchagent skills
 
 - MCP：local server 的 `command` 指向写 marker 的脚本，跑完 `list` + `doctor` 后 marker 不存在；并 mock `subprocess.Popen` 断言未被调用。
 - Skills：`root` 不存在时跑 `list` + `doctor`，断言 `root` 仍不存在（未 mkdir）。
+
+## Phase 3 前置：Session / Lock / Lease 原语验证
+
+运行：
+
+```bash
+python3 -m unittest discover -s tests
+python3 -m unittest tests.test_session_lock_lease
+```
+
+覆盖矩阵（`tests/test_session_lock_lease.py`）：
+
+| 场景 | 断言要点 |
+|---|---|
+| session 创建 | 目录/文件生成、文件 `0600`、目录 `0700`、字段完整、初始 `status=created` |
+| 状态机合法转换 | `created→active→waiting→active→completing→succeeded` 全链路持久化 |
+| 状态机非法转换 | 终态不可再变；`created→succeeded` 拒绝 |
+| 原子写 | `.tmp` 残留被忽略；主 JSON 损坏 → 结构化 error 且不自动修复 |
+| lock 互斥 | 二次 acquire → `lock_busy`；错误 token release → `conflict` 且锁仍持有；正确 token 后可重新 acquire |
+| lock 自动释放 | 释放后可立即重新获取；显式 unlock 失败仍关闭 fd 并清登记；持锁进程消失由内核释放（无 TTL、无 stale 回收） |
+| lease 获取 | session 内 `leaseToken/leaseEpoch` 更新、lease 文件生成 |
+| lease 续约 | `expiresAtNs` 更新、session `version` 递增；过期 lease 续约 → `lease_expired` |
+| 终态 lease 保护 | `succeeded` 后 acquire（含已过期 lease）/recover/renew 均返回 `session_terminal`；session 的 `version/leaseToken/leaseEpoch` 与 session/lease 文件内容均不变 |
+| lease 结构 fail-closed | 缺 `hostname`/`pid`，`pid` 非正整数，`epoch`/`ttlMs` 非正整数，时间为负或不满足 `expiresAtNs >= renewedAtNs >= acquiredAtNs` 均返回 `lease_invalid`，不接管、不改写 |
+| lease 过期写入 | 未过期可写；过期且无人接管时保存 → `lease_expired` |
+| **stale holder 被 fence** | 接管后 epoch+1；旧持有者写入 → `stale_lease_holder` |
+| **stale token + 最新 session** | 旧 token 传参即便 session dict 已是最新，也必须拒绝（fenced token 参数校验） |
+| 崩溃恢复 | `recover_expired_lease` 接管后旧 token 不可再写 |
+| 时钟回拨 | `now_ns` 小于 `renewedAtNs` 不误判过期 |
+| 双写中途失败 | lease 写成功但 session 写失败 → fail-closed，不留可用假状态 |
+| 参数校验 | 非法 `session_id`/`resource`/`ttl_ms`、`new_session_id` 空 slug 全部结构化 error |
+| 版本冲突 | `save_session` version 不匹配 → `session_version_conflict`；无 lease → `lease_required` |
+| 终态全路径保护 | `save_session`/`acquire_lease`/`recover_expired_lease`/`renew_lease` 对终态一律 `session_terminal`，且文件字节不变 |
+| 终态错误优先级 | 终态 + lease 过期 / 陈旧 version，仍统一 `session_terminal` |
+| lease 字段严格性 | `schemaVersion` 为 `true`/`1.0`/字符串、缺 `hostname`/`pid`、`pid<=0`、`epoch<=0`、`ttlMs<=0`、时间为负、时间倒置 → 全部 `lease_invalid` |
+| session result 契约 | `result.status` 必须为字符串、`result.refs` 必须为列表；不可 JSON 序列化值 → `session_invalid` 且不遗留锁 |
+
+验证结果：`python3 -m unittest discover -s tests` 全部通过（含本阶段新增用例；总数随阶段累积）。
+
+变异验证（故意破坏业务代码，验证后已还原并复绿）：
+
+- 接管时不递增 `epoch` → 转红；
+- `release_lock` 不校验 token → 转红；
+- 去掉 `save_session` 的 fenced token 参数校验 → 转红（**该缺口由变异测试发现并补上回归用例**）；
+- 去掉 `save_session` 的 lease 文件交叉校验 → 转红；
+- 续约不取单调基准（时钟回拨会缩短 lease）→ 转红；
+- 允许终态 session 再次保存 → 转红。

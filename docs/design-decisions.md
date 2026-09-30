@@ -135,3 +135,39 @@ rollback 要求：
 
 后续若要升级为上述强对抗模型，必须由用户重新确认 roadmap 并单独立项（如 `openat` 逐级打开、
 `selectors` 有界读取），不得在普通改动中顺手引入。
+
+## D11. Session / Lock / Lease 采用本地文件状态协议
+
+用户已确认（2026-09-29）。Phase 3（编排运行时）的前置：session 状态、并发互斥、崩溃回收。
+
+决策：
+
+- **session** 是任务状态真相源，落盘为 `<ORCHAGENT_HOME>/sessions/<id>/session.json`。
+- **lock** 保护单次 read-modify-write，用 **`fcntl.flock`（POSIX 内核锁）** 提供：
+  进程存活期间持锁，**进程消亡（含崩溃）由内核自动释放**，因此**无 TTL、无 stale 回收**，
+  默认 fail-fast 不无限等待。
+- **lease** 声明长任务所有权，TTL 60s + 续约，过期可被接管（逻辑所有权，与 OS 锁分工不同）。
+- **唯一写入路径**：获取 session lock → 校验 lease token/epoch → 原子写 → 释放 lock。
+- 启用 **fenced token**（`leaseToken` + 单调 `leaseEpoch`）：lease 过期后旧持有者写入必须失败
+  （直接针对教训卡 031 的静默覆盖失败模式）。
+- session 生命周期：`created → active ⇄ waiting → completing → succeeded`，另有
+  `failed` / `cancelled` / `expired` 终态；终态不可再变更。
+- 原子写：同目录 tmp + `fsync` + `os.replace`；文件 `0600`、目录 `0700`。
+- 读取损坏 JSON 一律 fail-closed，不自动修复。
+
+明确非目标（不再重开）：
+
+- 跨机 / NFS / 云盘分布式锁——本项目是本地运行时。
+- **Windows 支持**：`fcntl` 是 POSIX-only；本项目运行环境为 macOS / Linux，暂不支持 Windows。
+- 恶意进程任意改写 `ORCHAGENT_HOME`（与 D10 同一威胁模型边界）。
+- worker / subagent 直写 session 文件：**必须走 session API**。
+- 无限期阻塞等锁。
+- 本阶段不接 CLI、不改 doctor、不实现 workflow/dispatch/monitor/review/aggregation。
+
+协议细节见 [`session-lock-lease.md`](session-lock-lease.md)。后续升级（如 SQLite、跨平台锁抽象）
+必须由用户重新确认 roadmap 并单独立项，不得在普通改动中顺手引入。
+
+> 决策修订记录：初版曾计划用「文件目录 + TTL + rename 回收」实现锁，并在原 D11 中写明
+> 「不用 fcntl」。独立审查（2026-09-29）实证指出该方案存在 ABA 竞态（可导致双持有）
+> 与「无 owner 锁永久死锁」两个缺陷。用户确认改为 `fcntl.flock`：一次消除两个缺陷，
+> 且**删除**整套 TTL/stale 回收逻辑，代码更简单。故修订本节。
