@@ -33,13 +33,19 @@
 | v0.3.1 | 项目记忆 NOTES.md |
 | v0.4.0 | Phase 2B.1 测试基建（标准库 unittest 回归测试套件）|
 | v0.5.0 | Phase 2C MCP/Skills Registry 只读校验 |
+| v0.5.1 | 项目记忆补充 Phase 2C |
+| v0.6.0 | Phase 3 前置：session/lock/lease 设计 + 最小原语 + 测试 |
 
 - Phase 1 安装闭环：`install` / `rollback` / `doctor` / `config validate` / `extensions list` / `opencode link|unlink|rollback`
 - Phase 2A：`hooks list` / `hooks doctor` / `hooks run <event> --dry-run`（未带 `--dry-run` 必须失败）
 - Phase 2B：`knowledge list` / `knowledge search <query>`
 - Phase 2B.1：`tests/` 正式回归测试套件
 - Phase 2C：`mcp list|doctor`、`skills list|doctor`（只读校验；不启动 MCP、不安装 skill）
-- 未实现：skills/MCP runtime、knowledge 索引、Phase 3 编排运行时（Phase 1→2C 已全部完成）
+- Phase 3 前置：`orchagent/session.py` + `docs/session-lock-lease.md`（设计决策 D11）
+  - lock 用 `fcntl.flock`（POSIX 内核锁，崩溃自动释放，无 TTL/stale 回收）
+  - lease 带 TTL + fenced token（`leaseToken` + 单调 `leaseEpoch`）
+  - **本阶段不接 CLI、不改 doctor**；Phase 3 本体（workflow/dispatch/monitor/verify/aggregation）仍待开始
+- 未实现：skills/MCP runtime、knowledge 索引、Phase 3 编排运行时本体
 
 ## 测试
 
