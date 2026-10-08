@@ -37,6 +37,8 @@
 | v0.6.0 | Phase 3 前置：session/lock/lease 设计 + 最小原语 + 测试 |
 | v0.7.0 | Phase 3 编排模型设计（Pipeline + Skill，D12）|
 | v0.8.0 | Phase 3A：pipeline registry 校验 + builtin-only runner |
+| v0.8.1 | 项目记忆补充 Phase 3A |
+| v0.8.2 | Phase 3B-0：capability seam 设计文档 + D13（纯文档）|
 
 - Phase 1 安装闭环：`install` / `rollback` / `doctor` / `config validate` / `extensions list` / `opencode link|unlink|rollback`
 - Phase 2A：`hooks list` / `hooks doctor` / `hooks run <event> --dry-run`（未带 `--dry-run` 必须失败）
@@ -51,7 +53,15 @@
   - Pipeline = 阶段 + 门禁 + 回退边；`stage.skill` 与 `gate.evaluator` **只能引用已注册 skill**（fail-closed）
   - skill 新增 `backend` 必填字段（3A 仅 `builtin`）；`extensions` 由四类扩为**五类**（+pipeline）
   - 终止决策表、产出失效、attempt 额度、稳定键（stage_key/gate_key）均按 `docs/pipeline.md` §5 落实
-- 未实现：skills/MCP runtime、knowledge 索引、Phase 3B（agent 后端 + I/O schema）、Phase 3C（路由 + 真实流水线）
+- 未实现：skills/MCP runtime、knowledge 索引、Phase 3B 实现（3B-1..3B-3）、Phase 3C（路由 + 真实流水线）
+- Phase 3B-0（**仅文档**）：`docs/capability-seams.md`（参考 DeepSeek Harness 的 **capability seam**
+  （Definition/Provider/Consumer）+ 本机 opencode/codex 宿主机制实证 + orchAgent 映射）+ 设计决策 **D13**
+  - 定位：orchAgent 是宿主真实 skill 目录 / MCP 配置的**只读适配层**，**不自建第二套 registry**
+  - 分期**唯一来源** = `capability-seams.md` §9（3B-0..3B-6）；字段→子期映射唯一来源 = §9.1
+  - 用户已确认立即执行 **3B-0..3B-3**；3B-4（I/O 契约）/3B-5（local MCP）/3B-6（agent backend）需另行确认
+  - 关键边界：3B-3 **不连 MCP server**，故不产出真实 resources（真实资源属 3B-5）
+  - 文档治理：9 处文档由「四类」修正为**五类** extension；分期表/字段映射去重为**单一真相源 + 指针**
+  - 代码与文档冲突时遵循 **D9**（暂停并让用户确认）
 
 ## 测试
 
@@ -67,8 +77,9 @@ python3 -m unittest discover -s tests
 
 ## 已知缺口 / 待办
 
-- [ ] Phase 2C：MCP / Skills registry 校验（不自动启动 MCP、不自动装第三方 skill）
-- [ ] Phase 3：编排运行时（前置条件见 `docs/roadmap.md`）
+- [ ] Phase 3B 实现：3B-1 skill seam 只读 → 3B-2 pipeline 接入 → 3B-3 MCP 目录发现（用户已确认范围）
+- [ ] Phase 3B 待确认：3B-4 I/O 契约 / 3B-5 local MCP / 3B-6 agent backend
+- [ ] Phase 3C：路由 + 第一条真实流水线
 
 ## 开发流程约束
 
