@@ -13,7 +13,7 @@ from orchagent.install import copy_default_configs
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CLI_PATH = PROJECT_ROOT / "bin" / "orchagent"
-REGISTRY_KINDS = frozenset({"hooks", "skills", "mcp", "knowledge"})
+REGISTRY_KINDS = frozenset({"hooks", "skills", "mcp", "knowledge", "pipeline"})
 SUBPROCESS_ENV_ALLOWLIST = frozenset(
     {
         "PATH",

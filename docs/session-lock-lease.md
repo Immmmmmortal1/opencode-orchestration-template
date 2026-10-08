@@ -72,7 +72,8 @@ created / active / waiting               ──→ cancelled
 active / waiting                         ──→ expired
 ```
 
-终态：`succeeded` / `failed` / `cancelled` / `expired`，**终态不可再变更或同状态保存**。
+终态：`succeeded` / `failed` / `cancelled` / `expired`，**终态不可再变更或通过普通保存重复写入**。
+`finalize_session` 允许同一终态的幂等重试；不同终态仍拒绝。
 
 终态是**最强不变量**，对**所有写入路径**生效（`save_session`、`acquire_lease`、
 `recover_expired_lease`、`renew_lease`），且**优先于** lease 过期、版本冲突等诊断性错误——
@@ -264,6 +265,29 @@ lease 过期后旧进程可能只是**暂停**而非死亡。若它恢复后还�
 因此每次写 session 必须携带当前 `leaseToken + leaseEpoch`，由 session API 在 lock 内同时读取
 lease 与 session 两份真相并交叉校验；任一文件缺失、损坏或 ownership 不一致均返回
 `lease_state_conflict`。实现成本低、可确定性测试，**不属于过度工程**。
+
+### 5.6 终态收尾：`finalize_session`（3A 引入）
+
+D11 规定终态不可再变更，因此「写终态 + 释放 lease」**不能分两步**（第二步会被终态保护拒绝）。
+`session.py` 提供：
+
+```python
+finalize_session(home, session_id, *, lease_token, lease_epoch,
+                 terminal_status, result=None, error=None, now_ns=None)
+```
+
+规则：
+
+- `terminal_status` 只能是 `succeeded` / `failed` / `cancelled`；
+- 全部步骤在**同一个短 lock 临界区**内完成：校验 lease（存在/合法/token/epoch/未过期）→ 写终态 →
+  **删除 lease 文件**（释放长期所有权）；
+- 若 session 已是终态：不同终态请求拒绝（`session_terminal`）；同一终态请求按幂等成功返回，
+  且仅当残留 lease 的 `token + epoch` 均与入参一致时清理该 lease，否则保留并返回
+  `leaseRetained: true`；
+- **允许走合法路径到达终态**：如 `created → active → completing → succeeded` 的中间过渡由本函数内部完成，
+  调用方只需声明目标终态，不必手动先置 `active`/`completing`；
+  但**只走状态机的合法边**，不绕过 D11 状态机；
+- 失败路径（过期/不匹配/非法终态）不得产生任何写入副作用。
 
 ## 6. 失败语义
 

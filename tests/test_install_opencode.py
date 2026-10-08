@@ -29,7 +29,7 @@ class InstallTests(unittest.TestCase):
     def test_install_is_idempotent_and_force_controls_overwrite(self) -> None:
         copied = self.env.install_home()
 
-        self.assertEqual(6, len(copied))
+        self.assertEqual(7, len(copied))
         for dirname in RUNTIME_DIRS:
             self.assertTrue((self.env.home / dirname).is_dir())
         manifest = self.env.home / "install-manifest.json"
@@ -43,7 +43,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(sentinel, main_config.read_bytes())
 
         overwritten = copy_default_configs(self.env.home, overwrite=True)
-        self.assertEqual(6, len(overwritten))
+        self.assertEqual(7, len(overwritten))
         self.assertNotEqual(sentinel, main_config.read_bytes())
 
     def test_backup_root_is_sibling_of_home(self) -> None:

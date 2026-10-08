@@ -197,6 +197,9 @@ gate_key = (session_id, pipeline_revision, run_id, stage_id, attempt_no, gate_id
 每条 gate 结论必须记录：`gate_key`（含 `gate_id`）、`evaluator`（引用的 skill id）、`verdict`
 （`pass`/`fail`）、`evidence_ref`（证据引用）、`schemaVersion`、以及失效时的 `invalidated_reason`。
 
+3A 尚无 artifact store，因此结论以**内联 `evidence`** 承载 fixture 级证据，同时写入
+`evidenceRef: null`；`evidenceRef` 的引用格式留待 3B 引入 artifact store 时定义。
+
 结论必须**原子写入**（复用 D11 的原子写），不得出现"gate 已通过但结论未落盘"的中间态。
 
 ### 5.3 产出失效
@@ -221,6 +224,8 @@ gate_key = (session_id, pipeline_revision, run_id, stage_id, attempt_no, gate_id
 
 **校验对象**：判断是否"用尽"时，比较的是**回退目标 stage X 的 `attempt_no`** 与其
 `stage.maxAttempts`（不是触发失败的那个 stage，也不是每个 gate 各持一份）。
+此外，每次真正执行 stage 前都必须校验其自身下一次 `attempt_no`；若将超过该 stage 的
+`maxAttempts`，则不得执行 skill，并以 `attempts_exhausted` 终止。
 
 ### 5.6 终止决策表（唯一来源）
 
@@ -232,6 +237,9 @@ gate_key = (session_id, pipeline_revision, run_id, stage_id, attempt_no, gate_id
 | gate `fail` | 该 gate 自己的 `fail` 边所指的 stage（可能为"无"） |
 | gate 超时 | 同 gate `fail`（超时按失败处理） |
 | **stage 超时** | **`X = 无`**（stage 无自己的 `fail` 边，直接视为无回退目标） |
+
+runner 在 stage/gate 边界续约失败属于失权事件，不再进入回退判断：立即以 `lease_lost`
+终止并尽力释放 lease，避免失去所有权后仍静默推进。
 
 所有失败事件都走**同一张表**，不另设规则：
 
@@ -262,12 +270,17 @@ gate_key = (session_id, pipeline_revision, run_id, stage_id, attempt_no, gate_id
 （注意：多个 gate 共享同一 stage 的 `attempt_no` 计数，但**各自持有自己的 `fail` 边**——
 "共享计数"不等于"共享回退边"。）
 
+**多 gate 全通过时的推进**：该 stage 的**全部** gate 都 `pass` 后，以**最后一个 gate 的 `pass` 边**
+决定下一步（指向下一 stage 或 `{terminal: "succeeded"}`）。前序 gate 的 `pass` 边在此情形下不参与推进，
+仅用于声明该 gate 自身的 pass 分支存在。（这是 3A 的确定性解释，避免多 gate 场景下"该走谁的 pass 边"产生歧义。）
+
 ### 5.8 终止原因 → session 终态映射
 
 | 终止原因 | 对应 D11 session 终态 |
 |---|---|
 | `succeeded` | `succeeded` |
 | `gate_rejected` / `attempts_exhausted` / `timeout` / `failed` | `failed` |
+| `lease_lost` | `failed` |
 | `cancelled` | `cancelled` |
 
 ### 5.9 lock 与 lease 的释放边界（两件事，不要混）
@@ -344,6 +357,31 @@ gate_key = (session_id, pipeline_revision, run_id, stage_id, attempt_no, gate_id
 
 > 关键修正：3A **不是**"暂时允许非 skill 执行"，而是"先支持 `builtin` 后端的已注册 skill"。
 > 「stage 必须引用已注册 skill」这条约束**从 3A 第一天就生效**。
+
+### 10.1 3A 边界（用户已确认 2026-10-08）
+
+**3A 包含**：
+
+- pipeline registry（`extensions/pipeline.yaml`，作为**第 5 类 extension**）的定义与校验；
+- 最小 **runner**：按 §5 推进状态机（含门禁、回退、产出失效、attempt 计数、终止决策表）；
+- 阶段/门禁状态落 `session`（复用 D11 的 lock/lease）；
+- 两个 **fixture 级 builtin skill**：`orchagent.pipeline.emit-json`（产生产出）、
+  `orchagent.pipeline.assert-json-path-equals`（门禁断言）；
+- CLI：`pipeline list` / `pipeline doctor` / **`pipeline run`（极窄）**。
+
+**`pipeline run` 的边界**（明确防止变成通用引擎）：只按**显式** `--pipeline` 运行；**不做路由**；
+只执行 `backend=builtin` 且已注册的 skill；**不启动 agent、不启动 MCP、不做真实业务**；
+不做完整 I/O schema 接线；无后台 daemon、无动态调度。
+
+**3A 明确不做**：agent 后端（3B）、完整 I/O schema 与接线（3B）、路由选择（3C）、真实流水线（3C）。
+
+### 10.2 3A 引入的契约变更（升级影响）
+
+- `extensions` 由**四类扩为五类**（新增 `pipeline`）：`orchAgent.yaml` 的 `extensions.pipeline`
+  成为必填项。**旧安装的 home 需 `install --force` 或手动补该字段**，否则 `config validate` 报缺项。
+- skill 条目新增 **`backend` 字段且必填**，3A 合法值**仅 `builtin`**（`agent` 留 3B）。
+- 终止需要**原子动作**：因 D11 终态不可再变更，`session.py` 需新增 `finalize_session` 原语，
+  把「写终态 + 释放 lease」放在同一个受 lock/lease 保护的临界区内。
 
 ## 11. 非目标
 

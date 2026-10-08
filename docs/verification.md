@@ -353,3 +353,33 @@ python3 -m unittest tests.test_session_lock_lease
 - 去掉 `save_session` 的 lease 文件交叉校验 → 转红；
 - 续约不取单调基准（时钟回拨会缩短 lease）→ 转红；
 - 允许终态 session 再次保存 → 转红。
+
+## Phase 3A：Pipeline 定义 + 校验 + builtin-only 最小 runner
+
+运行：
+
+```bash
+python3 -m compileall orchagent tests
+python3 -m unittest discover -s tests
+python3 -m unittest tests.test_pipeline
+
+tmp="$(mktemp -d)"
+ORCHAGENT_HOME="$tmp/home" OPENCODE_CONFIG="$tmp/oc.json" ./bin/orchagent install --force
+ORCHAGENT_HOME="$tmp/home" OPENCODE_CONFIG="$tmp/oc.json" ./bin/orchagent pipeline list
+ORCHAGENT_HOME="$tmp/home" OPENCODE_CONFIG="$tmp/oc.json" ./bin/orchagent pipeline doctor
+```
+
+覆盖矩阵：
+
+| 文件 | 覆盖 |
+|---|---|
+| `tests/test_pipeline.py` | pipeline registry 结构与引用 fail-closed（未知字段/版本/重复 id/entryStage/edge 完整性/maxAttempts）；`stage.skill` 与 `gate.evaluator` 未注册、**disabled**、非 builtin、catalog 无实现；runner 成功路径、`gate_rejected`、**回退 + attempts 用尽**、**同 stage 多 gate 整体失效**、多 gate 全通过的推进解释；稳定键（stage_key/gate_key）字段齐全；终止决策表 6 行 + timeout 输入；引用非法 skill 时**无 session 副作用**；active lease 不被抢占；lease 在终止时释放 |
+| `tests/test_builtin_skills.py` | 两个 fixture builtin skill（`emit-json` / `assert-json-path-equals`）的成功与错误路径；JSONPath-lite 边界（不支持数组下标/通配） |
+| `tests/test_session_lock_lease.py` | 新增 `finalize_session` 语义（写终态 + 释放 lease、过期/重复拒绝）与 `terminal_status_path`（走合法路径到达终态） |
+
+验证结果：以当前 `python3 -m unittest discover -s tests` 的实际输出为准，不在文档中写死用例数。
+
+契约变更（升级影响）：
+
+- `extensions` 由四类扩为**五类**（新增 `pipeline`）；旧 home 缺 `extensions.pipeline` 时 `config validate` 报缺项，需 `install --force` 或手动补。
+- skill 条目新增 **`backend` 必填**字段，3A 合法值**仅 `builtin`**（`agent` 留 3B）。

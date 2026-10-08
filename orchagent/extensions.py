@@ -7,7 +7,7 @@ from .config import extension_registry_paths, read_text_config
 from .paths import DEFAULT_HOME
 
 
-EXTENSION_TYPES = ["hooks", "skills", "mcp", "knowledge"]
+EXTENSION_TYPES = ["hooks", "skills", "mcp", "knowledge", "pipeline"]
 
 
 def list_extensions(home: Path = DEFAULT_HOME) -> list[dict[str, Any]]:
@@ -34,11 +34,13 @@ def list_extensions(home: Path = DEFAULT_HOME) -> list[dict[str, Any]]:
             "skills": "skills",
             "mcp": "servers",
             "knowledge": "sources",
+            "pipeline": "pipelines",
         }[kind]
         items = data.get(item_key, [])
         runtime = {
             "hooks": "dryRunOnly",
             "knowledge": "searchOnly",
+            "pipeline": "builtinOnly",
         }.get(kind, "notImplemented")
         rows.append({
             "type": kind,

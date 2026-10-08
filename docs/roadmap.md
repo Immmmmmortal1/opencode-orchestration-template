@@ -168,7 +168,7 @@ orchagent skills list|doctor
 
 ## Phase 3A：Pipeline 定义 + Session 集成
 
-状态：未开始。规范定义见 [`pipeline.md`](pipeline.md)（唯一来源；本节为摘要，冲突时以该文为准）。
+状态：已实现（builtin-only 最小闭环），待独立审查。规范定义见 [`pipeline.md`](pipeline.md)（唯一来源；本节为摘要，冲突时以该文为准）。
 
 目标：
 

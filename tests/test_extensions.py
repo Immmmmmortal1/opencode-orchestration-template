@@ -5,7 +5,7 @@ import unittest
 from tests.helpers import IsolatedEnv
 
 
-EXTENSION_TYPES = ("hooks", "skills", "mcp", "knowledge")
+EXTENSION_TYPES = ("hooks", "skills", "mcp", "knowledge", "pipeline")
 
 
 class ExtensionsTests(unittest.TestCase):
@@ -27,6 +27,7 @@ class ExtensionsTests(unittest.TestCase):
                 "skills": "notImplemented",
                 "mcp": "notImplemented",
                 "knowledge": "searchOnly",
+                "pipeline": "builtinOnly",
             },
             {kind: row["runtime"] for kind, row in rows.items()},
         )

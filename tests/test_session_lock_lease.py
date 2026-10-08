@@ -15,6 +15,7 @@ from orchagent.session import (
     acquire_lease,
     acquire_lock,
     create_session,
+    finalize_session,
     lease_path,
     load_session,
     lock_file,
@@ -506,6 +507,284 @@ time.sleep(60)
         )
         self.assertEqual("error", rejected["status"])
         self.assertEqual("lease_expired", rejected["error"])
+
+    def test_finalize_session_writes_terminal_state_and_releases_lease(self) -> None:
+        created = self.create()
+        acquired = self.acquire(created["session"]["id"], ttl_ms=10_000)
+        active = save_session(
+            self.env.home,
+            dict(acquired["session"], status="active"),
+            lease_token=acquired["lease"]["token"],
+            lease_epoch=acquired["lease"]["epoch"],
+            now_ns=2_500_000_000,
+        )
+
+        finalized = finalize_session(
+            self.env.home,
+            active["session"]["id"],
+            lease_token=acquired["lease"]["token"],
+            lease_epoch=acquired["lease"]["epoch"],
+            terminal_status="failed",
+            result={"status": "failed", "refs": ["artifact.json"]},
+            error={"code": "gate_rejected"},
+            now_ns=3_000_000_000,
+        )
+
+        self.assertEqual("ok", finalized["status"])
+        self.assertEqual("failed", finalized["terminalStatus"])
+        self.assertEqual(active["session"]["version"] + 1, finalized["session"]["version"])
+        self.assertEqual(3_000_000_000, finalized["session"]["updatedAtNs"])
+        self.assertIsNone(finalized["session"]["leaseToken"])
+        self.assertFalse(lease_path(self.env.home, active["session"]["id"]).exists())
+        self.assertEqual(finalized["session"], load_session(self.env.home, active["session"]["id"])["session"])
+
+    def test_finalize_session_recovers_residual_lease_after_unlink_failure(self) -> None:
+        created = self.create()
+        acquired = self.acquire(created["session"]["id"], ttl_ms=10_000)
+        path = lease_path(self.env.home, created["session"]["id"])
+        original_unlink = Path.unlink
+        calls = 0
+
+        def fail_once(target: Path, *args: object, **kwargs: object) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OSError("injected unlink failure")
+            original_unlink(target, *args, **kwargs)
+
+        with patch("pathlib.Path.unlink", autospec=True, side_effect=fail_once):
+            first = finalize_session(
+                self.env.home,
+                created["session"]["id"],
+                lease_token=acquired["lease"]["token"],
+                lease_epoch=acquired["lease"]["epoch"],
+                terminal_status="failed",
+                now_ns=3_000_000_000,
+            )
+            recovered = finalize_session(
+                self.env.home,
+                created["session"]["id"],
+                lease_token=acquired["lease"]["token"],
+                lease_epoch=acquired["lease"]["epoch"],
+                terminal_status="failed",
+                now_ns=3_000_000_001,
+            )
+
+        self.assertEqual("session_finalize_failed", first["error"])
+        self.assertEqual("failed", load_session(self.env.home, created["session"]["id"])["session"]["status"])
+        self.assertTrue(recovered["recovered"])
+        self.assertEqual("ok", recovered["status"])
+        self.assertFalse(path.exists())
+
+    def test_idempotent_finalize_retains_residual_lease_when_epoch_mismatches(self) -> None:
+        created = self.create()
+        acquired = self.acquire(created["session"]["id"], ttl_ms=10_000)
+        path = lease_path(self.env.home, created["session"]["id"])
+
+        with patch("pathlib.Path.unlink", autospec=True, side_effect=OSError("injected unlink failure")):
+            first = finalize_session(
+                self.env.home,
+                created["session"]["id"],
+                lease_token=acquired["lease"]["token"],
+                lease_epoch=acquired["lease"]["epoch"],
+                terminal_status="failed",
+                now_ns=3_000_000_000,
+            )
+
+        repeated = finalize_session(
+            self.env.home,
+            created["session"]["id"],
+            lease_token=acquired["lease"]["token"],
+            lease_epoch=acquired["lease"]["epoch"] + 1,
+            terminal_status="failed",
+            now_ns=3_000_000_001,
+        )
+
+        self.assertEqual("session_finalize_failed", first["error"])
+        self.assertEqual("ok", repeated["status"])
+        self.assertFalse(repeated["recovered"])
+        self.assertTrue(repeated["leaseRetained"])
+        self.assertTrue(path.exists())
+
+    def test_finalize_session_reaches_terminal_from_created_via_legal_path(self) -> None:
+        """finalize 必须能走 D11 的合法路径到达终态（含 created -> succeeded）。
+
+        不要求调用方手动先置 active/completing：中间过渡由 finalize 内部完成。
+        """
+        for terminal in ("succeeded", "failed", "cancelled"):
+            with self.subTest(terminal=terminal):
+                with IsolatedEnv() as env:
+                    created = create_session(
+                        env.home, summary=f"fin-{terminal}", task_type="feature", now_ns=1_000_000_000
+                    )
+                    session_id = created["session"]["id"]
+                    acquired = acquire_lease(env.home, session_id, now_ns=2_000_000_000, ttl_ms=60_000)
+
+                    finalized = finalize_session(
+                        env.home,
+                        session_id,
+                        lease_token=acquired["lease"]["token"],
+                        lease_epoch=acquired["lease"]["epoch"],
+                        terminal_status=terminal,
+                        now_ns=2_000_000_001,
+                    )
+
+                    self.assertEqual("ok", finalized["status"], finalized)
+                    self.assertEqual(terminal, finalized["terminalStatus"])
+                    persisted = load_session(env.home, session_id)["session"]
+                    self.assertEqual(terminal, persisted["status"])
+                    self.assertFalse(lease_path(env.home, session_id).exists())
+
+    def test_terminal_status_path_is_legal_and_minimal(self) -> None:
+        from orchagent.session import STATUS_TRANSITIONS, terminal_status_path
+
+        self.assertEqual(["active", "completing", "succeeded"], terminal_status_path("created", "succeeded"))
+        self.assertEqual(["completing", "succeeded"], terminal_status_path("active", "succeeded"))
+        self.assertEqual(["cancelled"], terminal_status_path("created", "cancelled"))
+        # 终态无法再到别的终态
+        self.assertIsNone(terminal_status_path("succeeded", "failed"))
+        # 路径上的每一步都必须是状态机允许的合法边
+        path = terminal_status_path("created", "succeeded")
+        self.assertIsNotNone(path)
+        cursor = "created"
+        for step in path:
+            self.assertIn(step, STATUS_TRANSITIONS[cursor])
+            cursor = step
+
+    def test_finalize_session_rejects_expired_lease_without_mutation(self) -> None:
+        created = self.create()
+        acquired = self.acquire(created["session"]["id"], now_ns=2_000_000_000, ttl_ms=1)
+        session_before = session_path(self.env.home, created["session"]["id"]).read_bytes()
+        lease_before = lease_path(self.env.home, created["session"]["id"]).read_bytes()
+
+        rejected = finalize_session(
+            self.env.home,
+            created["session"]["id"],
+            lease_token=acquired["lease"]["token"],
+            lease_epoch=acquired["lease"]["epoch"],
+            terminal_status="failed",
+            now_ns=2_001_000_001,
+        )
+
+        self.assertEqual("lease_expired", rejected["error"])
+        self.assertEqual(session_before, session_path(self.env.home, created["session"]["id"]).read_bytes())
+        self.assertEqual(lease_before, lease_path(self.env.home, created["session"]["id"]).read_bytes())
+
+    def test_terminal_session_finalize_is_idempotent_only_for_same_terminal(self) -> None:
+        created = self.create()
+        acquired = self.acquire(created["session"]["id"], ttl_ms=10_000)
+        first = finalize_session(
+            self.env.home,
+            created["session"]["id"],
+            lease_token=acquired["lease"]["token"],
+            lease_epoch=acquired["lease"]["epoch"],
+            terminal_status="cancelled",
+            now_ns=3_000_000_000,
+        )
+        self.assertEqual("ok", first["status"])
+
+        repeated = finalize_session(
+            self.env.home,
+            created["session"]["id"],
+            lease_token=acquired["lease"]["token"],
+            lease_epoch=acquired["lease"]["epoch"],
+            terminal_status="cancelled",
+            now_ns=3_000_000_001,
+        )
+        self.assertEqual("ok", repeated["status"])
+        self.assertFalse(repeated["recovered"])
+
+        rejected = finalize_session(
+            self.env.home,
+            created["session"]["id"],
+            lease_token=acquired["lease"]["token"],
+            lease_epoch=acquired["lease"]["epoch"],
+            terminal_status="failed",
+            now_ns=3_000_000_002,
+        )
+        self.assertEqual("session_terminal", rejected["error"])
+
+    def test_finalize_session_rejects_invalid_terminal_and_payloads(self) -> None:
+        created = self.create()
+        acquired = self.acquire(created["session"]["id"], ttl_ms=10_000)
+
+        invalid_status = finalize_session(
+            self.env.home,
+            created["session"]["id"],
+            lease_token=acquired["lease"]["token"],
+            lease_epoch=acquired["lease"]["epoch"],
+            terminal_status="expired",
+            now_ns=3_000_000_000,
+        )
+        invalid_result = finalize_session(
+            self.env.home,
+            created["session"]["id"],
+            lease_token=acquired["lease"]["token"],
+            lease_epoch=acquired["lease"]["epoch"],
+            terminal_status="failed",
+            result={"status": "failed", "refs": [object()]},
+            now_ns=3_000_000_000,
+        )
+        invalid_extra = finalize_session(
+            self.env.home,
+            created["session"]["id"],
+            lease_token=acquired["lease"]["token"],
+            lease_epoch=acquired["lease"]["epoch"],
+            terminal_status="failed",
+            extra_fields={"pipelineRuns": object()},
+            now_ns=3_000_000_000,
+        )
+
+        self.assertEqual("invalid_terminal_status", invalid_status["error"])
+        self.assertEqual("session_invalid", invalid_result["error"])
+        self.assertEqual("session_invalid", invalid_extra["error"])
+        self.assertTrue(lease_path(self.env.home, created["session"]["id"]).exists())
+
+    def test_finalize_session_atomically_merges_extra_fields(self) -> None:
+        created = self.create()
+        acquired = self.acquire(created["session"]["id"], ttl_ms=10_000)
+        run = {"run-1": {"status": "succeeded", "attempts": {"emit": 1}}}
+
+        finalized = finalize_session(
+            self.env.home,
+            created["session"]["id"],
+            lease_token=acquired["lease"]["token"],
+            lease_epoch=acquired["lease"]["epoch"],
+            terminal_status="succeeded",
+            result={"status": "succeeded", "refs": []},
+            extra_fields={"pipelineRuns": run, "currentStep": "emit"},
+            now_ns=3_000_000_000,
+        )
+
+        self.assertEqual("ok", finalized["status"], finalized)
+        persisted = load_session(self.env.home, created["session"]["id"])["session"]
+        self.assertEqual("succeeded", persisted["status"])
+        self.assertEqual(run, persisted["pipelineRuns"])
+        self.assertFalse(lease_path(self.env.home, created["session"]["id"]).exists())
+
+    def test_finalize_session_rejects_reserved_and_unknown_extra_fields_without_mutation(self) -> None:
+        created = self.create()
+        acquired = self.acquire(created["session"]["id"], ttl_ms=10_000)
+        session_file = session_path(self.env.home, created["session"]["id"])
+        lease_file = lease_path(self.env.home, created["session"]["id"])
+        session_before = session_file.read_bytes()
+        lease_before = lease_file.read_bytes()
+
+        for extra_fields in ({"leaseEpoch": 999}, {"unexpected": True}):
+            with self.subTest(extra_fields=extra_fields):
+                rejected = finalize_session(
+                    self.env.home,
+                    created["session"]["id"],
+                    lease_token=acquired["lease"]["token"],
+                    lease_epoch=acquired["lease"]["epoch"],
+                    terminal_status="failed",
+                    extra_fields=extra_fields,
+                    now_ns=3_000_000_000,
+                )
+
+                self.assertEqual("session_invalid", rejected["error"])
+                self.assertEqual(session_before, session_file.read_bytes())
+                self.assertEqual(lease_before, lease_file.read_bytes())
 
     def test_stale_holder_cannot_write_after_lease_takeover(self) -> None:
         created = self.create()

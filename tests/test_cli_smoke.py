@@ -40,7 +40,7 @@ class CliSmokeTests(unittest.TestCase):
 
         extensions = self.assert_ok("extensions", "list")
         self.assertEqual(
-            {"hooks", "skills", "mcp", "knowledge"},
+            {"hooks", "skills", "mcp", "knowledge", "pipeline"},
             {row["type"] for row in extensions["extensions"]},
         )
 
@@ -77,6 +77,8 @@ class CliSmokeTests(unittest.TestCase):
         )
         self.assert_ok("skills", "list")
         self.assert_success_json("skills", "doctor")
+        self.assert_ok("pipeline", "list")
+        self.assert_success_json("pipeline", "doctor")
 
         self.assert_ok("opencode", "link")
         self.assert_ok("opencode", "doctor")

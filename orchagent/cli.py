@@ -15,6 +15,7 @@ from .opencode import doctor as opencode_doctor
 from .opencode import link as opencode_link
 from .opencode import unlink as opencode_unlink
 from .paths import DEFAULT_HOME
+from .pipeline import doctor_pipelines, list_pipelines, run_pipeline
 from .skills import doctor_skills, list_skills
 
 
@@ -131,6 +132,33 @@ def cmd_skills(args: argparse.Namespace) -> int:
     return 2
 
 
+def cmd_pipeline(args: argparse.Namespace) -> int:
+    if args.pipeline_cmd == "list":
+        result = list_pipelines(DEFAULT_HOME)
+        print_json(result)
+        return 0 if result.get("status") == "ok" else 1
+    if args.pipeline_cmd == "doctor":
+        skills_result = list_skills(DEFAULT_HOME)
+        skills_lookup = {
+            skill["id"]: skill
+            for skill in skills_result.get("skills", [])
+            if isinstance(skill, dict) and isinstance(skill.get("id"), str)
+        }
+        ok, result = doctor_pipelines(DEFAULT_HOME, skills_lookup)
+        print_json(result)
+        return 0 if ok else 1
+    if args.pipeline_cmd == "run":
+        result = run_pipeline(
+            DEFAULT_HOME,
+            args.pipeline,
+            session_id=args.session_id,
+            new_session_summary=args.new_session_summary,
+        )
+        print_json(result)
+        return 0 if result.get("status") == "ok" else 1
+    return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orchagent")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -153,7 +181,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_ext = sub.add_parser("extensions")
     ext_sub = p_ext.add_subparsers(dest="extensions_cmd", required=True)
     p_list = ext_sub.add_parser("list")
-    p_list.add_argument("--type", choices=["hooks", "skills", "mcp", "knowledge"])
+    p_list.add_argument("--type", choices=["hooks", "skills", "mcp", "knowledge", "pipeline"])
     p_ext.set_defaults(func=cmd_extensions)
 
     p_open = sub.add_parser("opencode")
@@ -191,6 +219,17 @@ def build_parser() -> argparse.ArgumentParser:
     skills_sub.add_parser("list")
     skills_sub.add_parser("doctor")
     p_skills.set_defaults(func=cmd_skills)
+
+    p_pipeline = sub.add_parser("pipeline")
+    pipeline_sub = p_pipeline.add_subparsers(dest="pipeline_cmd", required=True)
+    pipeline_sub.add_parser("list")
+    pipeline_sub.add_parser("doctor")
+    p_pipeline_run = pipeline_sub.add_parser("run")
+    p_pipeline_run.add_argument("--pipeline", required=True)
+    session_group = p_pipeline_run.add_mutually_exclusive_group(required=True)
+    session_group.add_argument("--new-session-summary")
+    session_group.add_argument("--session-id")
+    p_pipeline.set_defaults(func=cmd_pipeline)
     return parser
 
 

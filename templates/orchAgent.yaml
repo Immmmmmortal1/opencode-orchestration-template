@@ -17,7 +17,8 @@
     "hooks": "~/.orchAgent/extensions/hooks.yaml",
     "skills": "~/.orchAgent/extensions/skills.yaml",
     "mcp": "~/.orchAgent/extensions/mcp.yaml",
-    "knowledge": "~/.orchAgent/extensions/knowledge.yaml"
+    "knowledge": "~/.orchAgent/extensions/knowledge.yaml",
+    "pipeline": "~/.orchAgent/extensions/pipeline.yaml"
   },
   "opencode": {
     "enabled": true,

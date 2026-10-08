@@ -84,6 +84,7 @@ def copy_default_configs(home: Path = DEFAULT_HOME, overwrite: bool = False, lin
         (template_path("extensions", "skills.yaml"), home / "extensions" / "skills.yaml"),
         (template_path("extensions", "mcp.yaml"), home / "extensions" / "mcp.yaml"),
         (template_path("extensions", "knowledge.yaml"), home / "extensions" / "knowledge.yaml"),
+        (template_path("extensions", "pipeline.yaml"), home / "extensions" / "pipeline.yaml"),
         (template_path("integrations", "opencode.patch.json"), home / "integrations" / "opencode.patch.json"),
     ]
     root = backup_root(home)

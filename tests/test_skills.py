@@ -36,12 +36,14 @@ def skill(
     skill_id: Any = "test-skill",
     adapter_id: Any = ADAPTER_ID,
     enabled: Any = True,
+    backend: Any = "builtin",
 ) -> dict[str, Any]:
     return {
         "id": skill_id,
         "adapter": adapter_id,
         "path": path,
         "enabled": enabled,
+        "backend": backend,
     }
 
 
@@ -125,6 +127,10 @@ class SkillsTests(unittest.TestCase):
             registry(skills=[skill(adapter_id="missing")]),
             registry(skills=[skill(path="")]),
             registry(skills=[skill(enabled="true")]),
+            registry(skills=[skill(backend=None)]),
+            registry(skills=[skill(backend=1)]),
+            registry(skills=[skill(backend="unknown")]),
+            registry(skills=[skill(backend="agent")]),
             registry(skills=[unknown_field]),
         ]
         for data in cases:
@@ -230,6 +236,7 @@ class SkillsTests(unittest.TestCase):
 
         self.assertEqual("ok", listed["status"])
         self.assertEqual("Sample", listed["skills"][0]["name"])
+        self.assertEqual("builtin", listed["skills"][0]["backend"])
 
     def test_frontmatter_rejects_missing_closing_delimiter(self) -> None:
         self.create_skill(frontmatter="---\nname: Sample\ndescription: Valid\n")

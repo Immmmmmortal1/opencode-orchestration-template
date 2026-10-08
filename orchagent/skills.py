@@ -12,7 +12,7 @@ from .paths import DEFAULT_HOME
 SUPPORTED_ADAPTER_TYPES = {"filesystem"}
 REGISTRY_FIELDS = {"version", "adapters", "skills"}
 ADAPTER_FIELDS = {"id", "type", "enabled", "root"}
-SKILL_FIELDS = {"id", "adapter", "path", "enabled"}
+SKILL_FIELDS = {"id", "adapter", "path", "enabled", "backend"}
 SENSITIVE_PATH_PARTS = {"secrets", "api-keys", "mail", "accounts"}
 
 
@@ -85,6 +85,13 @@ def _load_registry(home: Path) -> tuple[Path, dict[str, Any] | None, str | None]
             return path, None, f"skill {skill_id} references missing adapter"
         if not isinstance(skill.get("path"), str) or not skill["path"].strip():
             return path, None, f"skill {skill_id} path must be non-empty string"
+        backend = skill.get("backend")
+        if backend == "agent":
+            return path, None, f"skill {skill_id} backend agent is not supported until 3B"
+        if not isinstance(backend, str):
+            return path, None, f"skill {skill_id} backend is required and must be string"
+        if backend != "builtin":
+            return path, None, f"unsupported skill backend: {backend}"
         if "enabled" in skill and not isinstance(skill["enabled"], bool):
             return path, None, f"skill {skill_id} enabled must be boolean"
         skill_ids.add(skill_id)
@@ -283,6 +290,7 @@ def _inspect_registry(
             "id": skill["id"],
             "adapter": skill["adapter"],
             "path": skill["path"],
+            "backend": skill["backend"],
             "enabled": enabled,
             "status": status,
             "name": None,

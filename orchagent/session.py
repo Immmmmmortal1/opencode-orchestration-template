@@ -18,6 +18,7 @@ SESSION_SCHEMA_VERSION = 1
 LEASE_SCHEMA_VERSION = 1
 LEASE_TTL_MS = 60_000
 MAX_SLUG_LENGTH = 48
+FINALIZE_EXTRA_FIELDS = {"pipelineRuns", "currentStep"}
 
 _LOCK_FDS: dict[str, int] = {}
 _LOCK_OWNERS: dict[str, tuple[Path, str]] = {}
@@ -207,6 +208,8 @@ def _validate_session(session: dict, expected_id: str | None = None) -> str | No
         return "session result.refs must be a list"
     if session.get("error") is not None and not isinstance(session.get("error"), dict):
         return "session error must be null or an object"
+    if "pipelineRuns" in session and not isinstance(session.get("pipelineRuns"), dict):
+        return "session pipelineRuns must be an object"
     return None
 
 
@@ -279,6 +282,33 @@ def transition_status(session: dict, new_status: str) -> tuple[bool, str | None]
             return False, f"terminal status {current} cannot transition"
         return False, f"invalid status transition: {current} -> {new_status}"
     return True, None
+
+
+def terminal_status_path(current: str, target: str) -> list[str] | None:
+    """求从 current 到 target 终态的**最短合法路径**（含 target），无合法路径返回 None。
+
+    存在意义：D11 的状态机要求 `created → active → completing → succeeded`，
+    但调用方（如 pipeline runner）只想说"结束这次运行"。
+    把中间过渡步骤关在本函数里，避免把 D11 的内部状态细节泄漏给每个调用方。
+    本函数**只走合法边**，不绕过状态机。
+    """
+    if current not in STATUS_TRANSITIONS or target not in TERMINAL_STATUSES:
+        return None
+    if current == target:
+        return []
+    # BFS 求最短路径（状态空间极小，无需优化）
+    queue: list[list[str]] = [[current]]
+    seen = {current}
+    while queue:
+        path = queue.pop(0)
+        for nxt in STATUS_TRANSITIONS[path[-1]]:
+            if nxt in seen:
+                continue
+            if nxt == target:
+                return path[1:] + [target]
+            seen.add(nxt)
+            queue.append(path + [nxt])
+    return None
 
 
 def acquire_lock(
@@ -448,6 +478,149 @@ def save_session(
                             except OSError as exc:
                                 result = _result_error("session_save_failed", f"failed to save session: {exc}")
     return _lock_release_result(held, result)
+
+
+def finalize_session(
+    home: Path = DEFAULT_HOME,
+    session_id: str = "",
+    *,
+    lease_token: str | None = None,
+    lease_epoch: int | None = None,
+    terminal_status: str = "failed",
+    result: object | None = None,
+    error: object | None = None,
+    extra_fields: dict | None = None,
+    now_ns: int | None = None,
+) -> dict:
+    """在一次短锁临界区内写入终态并释放长期 lease。"""
+    if terminal_status not in {"succeeded", "failed", "cancelled"}:
+        return _result_error("invalid_terminal_status", "terminal status must be succeeded, failed, or cancelled")
+    if not _valid_session_id(session_id):
+        return _result_error("invalid_session_id", "session id is invalid")
+    if extra_fields is not None and not isinstance(extra_fields, dict):
+        return _result_error("session_invalid", "extra_fields must be an object")
+    if extra_fields is not None:
+        unsupported_fields = [field for field in extra_fields if field not in FINALIZE_EXTRA_FIELDS]
+        if unsupported_fields:
+            return _result_error(
+                "session_invalid",
+                f"extra_fields contains unsupported field: {unsupported_fields[0]!r}",
+            )
+
+    now = _now_ns(now_ns)
+    resource = _session_lock_resource(session_id)
+    with _held_session_lock(home, resource) as held:
+        lock = held["acquire"]
+        if lock.get("status") != "ok":
+            operation_result = lock
+        else:
+            loaded = load_session(home, session_id)
+            if loaded.get("status") != "ok":
+                operation_result = loaded
+            else:
+                current = loaded["session"]
+                if current.get("status") in TERMINAL_STATUSES:
+                    if current.get("status") != terminal_status:
+                        operation_result = _result_error("session_terminal", "terminal session cannot be finalized")
+                    else:
+                        # session 已先落终态但 lease 删除失败时，允许同一终态请求幂等补偿。
+                        # token/epoch 任一不匹配时不得删除可能属于其他持有者的文件，
+                        # 但同一终态本身已达成，仍按幂等成功返回并明确保留 lease。
+                        path = lease_path(home, session_id)
+                        lease, lease_error = _load_lease(home, session_id) if path.exists() else (None, None)
+                        recovered = False
+                        if (
+                            lease_error is None
+                            and lease is not None
+                            and lease.get("token") == lease_token
+                            and lease.get("epoch") == lease_epoch
+                        ):
+                            try:
+                                path.unlink()
+                                _fsync_directory(path.parent)
+                            except OSError as exc:
+                                operation_result = _result_error(
+                                    "session_finalize_failed", f"failed to finalize session: {exc}"
+                                )
+                            else:
+                                recovered = True
+                                operation_result = {
+                                    "status": "ok",
+                                    "session": current,
+                                    "terminalStatus": terminal_status,
+                                    "recovered": recovered,
+                                    "leaseRetained": False,
+                                }
+                        else:
+                            operation_result = {
+                                "status": "ok",
+                                "session": current,
+                                "terminalStatus": terminal_status,
+                                "recovered": recovered,
+                                "leaseRetained": path.exists(),
+                            }
+                else:
+                    lease, lease_error = _load_lease(home, session_id)
+                    if current.get("leaseToken") is None:
+                        operation_result = _result_error("lease_required", "session has no active lease")
+                    elif lease_error:
+                        operation_result = _result_error("lease_state_conflict", "current lease file is missing or invalid")
+                    elif lease is None or lease.get("token") != current.get("leaseToken") or lease.get("epoch") != current.get("leaseEpoch"):
+                        operation_result = _result_error("lease_state_conflict", "lease file and session ownership do not match")
+                    elif lease_token != current.get("leaseToken") or lease_epoch != current.get("leaseEpoch"):
+                        operation_result = _result_error("stale_lease_holder", "lease token or epoch does not match current holder")
+                    elif now > lease["expiresAtNs"]:
+                        operation_result = _result_error("lease_expired", "expired lease cannot finalize session")
+                    else:
+                        # 允许 finalize 走 D11 的合法路径到达终态（如
+                        # created -> active -> completing -> succeeded）；
+                        # 中间过渡步骤只在本函数内完成，不暴露给调用方。
+                        status_path = terminal_status_path(current.get("status"), terminal_status)
+                        if status_path is None:
+                            operation_result = _result_error(
+                                "invalid_status_transition",
+                                f"invalid status transition: {current.get('status')} -> {terminal_status}",
+                            )
+                        else:
+                            updated = dict(current)
+                            if extra_fields is not None:
+                                updated.update(extra_fields)
+                            updated["status"] = terminal_status
+                            updated["leaseToken"] = None
+                            updated["updatedAtNs"] = now
+                            updated["version"] = current["version"] + 1
+                            if result is not None:
+                                updated["result"] = result
+                            if error is not None:
+                                updated["error"] = error
+
+                            validation_error = _validate_session(updated, session_id)
+                            if validation_error:
+                                operation_result = _result_error("session_invalid", validation_error)
+                            else:
+                                try:
+                                    json.dumps(updated, ensure_ascii=False, indent=2, sort_keys=True)
+                                except (TypeError, ValueError) as exc:
+                                    operation_result = _result_error(
+                                        "session_invalid", f"session must be JSON serializable: {exc}"
+                                    )
+                                else:
+                                    try:
+                                        _atomic_write_json(session_path(home, session_id), updated)
+                                        lease_path(home, session_id).unlink()
+                                        # lease 目录项变化也尽力刷盘，与 session 原子写的目录处理保持一致。
+                                        _fsync_directory(lease_path(home, session_id).parent)
+                                    except OSError as exc:
+                                        operation_result = _result_error(
+                                            "session_finalize_failed", f"failed to finalize session: {exc}"
+                                        )
+                                    else:
+                                        operation_result = {
+                                            "status": "ok",
+                                            "session": updated,
+                                            "terminalStatus": terminal_status,
+                                        }
+    return _lock_release_result(held, operation_result)
 
 
 def _load_lease(home: Path, session_id: str) -> tuple[dict | None, dict | None]:

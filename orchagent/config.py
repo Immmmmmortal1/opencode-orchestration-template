@@ -8,7 +8,7 @@ from .paths import DEFAULT_HOME, expand_path
 
 
 REQUIRED_TOP_LEVEL = ["version", "core", "entrypoints", "extensions", "opencode", "state"]
-EXTENSION_FILES = ["hooks", "skills", "mcp", "knowledge"]
+EXTENSION_FILES = ["hooks", "skills", "mcp", "knowledge", "pipeline"]
 
 
 def read_text_config(path: Path) -> dict[str, Any]:
@@ -62,8 +62,9 @@ def validate_extension_registry(path: Path) -> list[str]:
     data = read_text_config(path)
     if data.get("version") != 1:
         errors.append(f"{path}: version must be 1")
-    if "adapters" not in data:
-        errors.append(f"{path}: missing adapters")
+    required_key = "pipelines" if path.stem == "pipeline" else "adapters"
+    if required_key not in data:
+        errors.append(f"{path}: missing {required_key}")
     return errors
 
 
