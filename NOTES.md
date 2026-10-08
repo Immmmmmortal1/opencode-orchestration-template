@@ -35,6 +35,8 @@
 | v0.5.0 | Phase 2C MCP/Skills Registry 只读校验 |
 | v0.5.1 | 项目记忆补充 Phase 2C |
 | v0.6.0 | Phase 3 前置：session/lock/lease 设计 + 最小原语 + 测试 |
+| v0.7.0 | Phase 3 编排模型设计（Pipeline + Skill，D12）|
+| v0.8.0 | Phase 3A：pipeline registry 校验 + builtin-only runner |
 
 - Phase 1 安装闭环：`install` / `rollback` / `doctor` / `config validate` / `extensions list` / `opencode link|unlink|rollback`
 - Phase 2A：`hooks list` / `hooks doctor` / `hooks run <event> --dry-run`（未带 `--dry-run` 必须失败）
@@ -45,7 +47,11 @@
   - lock 用 `fcntl.flock`（POSIX 内核锁，崩溃自动释放，无 TTL/stale 回收）
   - lease 带 TTL + fenced token（`leaseToken` + 单调 `leaseEpoch`）
   - **本阶段不接 CLI、不改 doctor**；Phase 3 本体（workflow/dispatch/monitor/verify/aggregation）仍待开始
-- 未实现：skills/MCP runtime、knowledge 索引、Phase 3 编排运行时本体
+- Phase 3A：`pipeline list|doctor|run`（registry 校验 + **builtin-only 最小 runner**）
+  - Pipeline = 阶段 + 门禁 + 回退边；`stage.skill` 与 `gate.evaluator` **只能引用已注册 skill**（fail-closed）
+  - skill 新增 `backend` 必填字段（3A 仅 `builtin`）；`extensions` 由四类扩为**五类**（+pipeline）
+  - 终止决策表、产出失效、attempt 额度、稳定键（stage_key/gate_key）均按 `docs/pipeline.md` §5 落实
+- 未实现：skills/MCP runtime、knowledge 索引、Phase 3B（agent 后端 + I/O schema）、Phase 3C（路由 + 真实流水线）
 
 ## 测试
 
