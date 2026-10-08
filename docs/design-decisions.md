@@ -34,7 +34,7 @@
 
 ## D3. Core + Extension Registry
 
-Core 不写死 hooks、skills、mcp、knowledge 的具体实现。
+Core 不写死 hooks、skills、mcp、knowledge、pipeline 的具体实现。
 
 Core 只负责：
 
@@ -51,6 +51,7 @@ Core 只负责：
 
 - hooks：`dryRunOnly`
 - knowledge：`searchOnly`
+- pipeline：`builtinOnly`（只执行 `builtin` 后端 skill）
 - skills / MCP：`notImplemented`
 
 禁止把声明状态叫做：
@@ -210,3 +211,48 @@ rollback 要求：
 
 模型细节（字段命名、回退边语义、3A/3B/3C 拆分、非目标）**全部见 [`pipeline.md`](pipeline.md)**，
 本文不复制。
+
+## D13. Skill / MCP 采用 capability seam + provider 模型
+
+用户已确认（2026-10-08）。Phase 3B 的核心模型。
+
+原因：用户明确要求「skill 和 MCP 都是需要可插拔的」。2C/3A 的 registry 只是**显式声明校验器**，
+既不是 seam，又与本机宿主（opencode / codex）**原生 skill 发现机制**重复——orchAgent 再建一套
+registry 会制造第二真相源。
+
+**本文记录决策与边界；规范定义以 [`capability-seams.md`](capability-seams.md) 为唯一来源。**
+文档之间冲突时以该文为准；**但代码与文档冲突时，一律遵循 [D9](design-decisions.md)
+（先暂停并让用户确认），本文与该文均不例外。**
+
+决策：
+
+- **引入 capability seam 三角色**（Definition / Provider / Consumer），对照参考项目
+  **DeepSeek Harness**（`deepseek-ai/deepseek-harness`，"Everything is a Plugin"，MIT）。
+  **借鉴其核心契约与语义，并按 orchAgent 的静态 CLI 模型适配**（非照搬：如 provider 内排序改为
+  路径字典序、失效机制改为 CLI snapshot/hash，见 [`capability-seams.md`](capability-seams.md) §4.3/§6）。
+- **不自建第二套宿主 registry**：orchAgent 是宿主真实 skill 目录 / MCP 配置的
+  **只读适配层**；不安装、不复制、不改写宿主 skill。
+- **两个 seam**：skill（`SkillRegistry`）与 MCP（`McpResourceRegistry`），各自支持多 provider 合并。
+- **渐进披露**：`list()` 只出**目录元数据**（含 `name`/`description` 等，**不含正文**），
+  `get()` 才读正文（字段以 [`capability-seams.md`](capability-seams.md) §5 为准）。
+- **裁决规则**：`rank` 小者胜 → provider 注册序 → 路径字典序；被遮蔽者进入 `conflicts`，不参与 pipeline。
+- **失败隔离**：单 provider 失败只跳过 + warning；`complete=false` 不缓存；
+  有历史完整 snapshot 可保留并标 `stale`；无 snapshot 且 pipeline 引用缺失 → **fail-closed**。
+- **安全**：宿主目录引入**显式 allowed roots**（不再简单沿用「必须在 `ORCHAGENT_HOME` 内」）；
+  逐段拒 symlink、hardlink fail-closed、敏感名拒绝、不回显 env/headers/secrets。
+- **extensions 保持五类**，不在 3B 增加第六类；skills/mcp 在类内升级为 seam/provider registry。
+- **迁移**：skills/mcp registry 支持 v1/v2 双读，**默认模板保持 v1**（旧 home 不破）。
+
+明确边界：
+
+- 参考依据是**实证**（dsh 官方文档 + 本机宿主二进制/目录），非推演（教训卡 069）。
+- 3B 分期**以 [`capability-seams.md`](capability-seams.md) §9 为唯一定义**（3B-0..3B-6），本文不复制该表；
+  **用户已确认的立即执行范围为 3B-0..3B-3**，3B-4..3B-6 需另行确认排期。
+- `runtime` 状态必须准确反映能力边界（D4），不得把 `declared` 伪装成已运行。
+
+明确非目标（不再重开）：
+
+- agent backend **真实执行**（另立子期）；
+- remote MCP **网络连接**；
+- 通用 plugin 框架 / 动态加载器；
+- 隐式扫描未声明的宿主目录。

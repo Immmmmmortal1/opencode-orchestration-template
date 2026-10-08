@@ -39,6 +39,7 @@ orchagent skills doctor
 - `id`：非空字符串，唯一
 - `adapter`：必须引用已声明的 filesystem adapter
 - `path`：非空字符串；相对路径以 adapter `root` 为基准
+- `backend`：**必填**（3A 起）；当前合法值**仅 `builtin`**（`agent` 子期见 [`capability-seams.md`](capability-seams.md) §9.1）
 - `enabled`：可选；若出现必须是 boolean
 - 未知字段一律拒绝
 
@@ -70,26 +71,37 @@ frontmatter 采用**受限语法**（不引入 YAML 依赖，只支持 `key: val
 - 条目 `enabled: false` → 不要求目录存在
 - 输出不回显 `description` 全文，避免超长/敏感内容进入 JSON
 
-## Phase 3 扩展：Skill 的 I/O 契约（**尚未实现**）
+## Phase 3 扩展：Skill 的 I/O 契约
 
 Phase 3 会把 skill 作为流水线的**最小执行单元**（见 [`pipeline.md`](pipeline.md) 与 D12），
 因此 skill 条目需要声明 I/O，才能把「上一阶段输出 → 下一阶段输入」接线。
 
-拟扩展字段分期（**当前代码尚未实现**）：
+**当前（3A 已实现）**：`backend` 必填、合法值**仅 `builtin`**；`skills list|doctor` 校验
+**skill registry**（`id` / `adapter` / `path` / `backend` / 目录存在性 / `SKILL.md` frontmatter /
+路径边界）；**`pipeline doctor`** 校验 `stage.skill` 与 `gate.evaluator` 对 skill 的**引用完整性**
+（引用不存在或非 `builtin` → fail-closed）。两者**不校验 I/O 契约**（尚未定义）。
 
-| 字段 | 引入阶段 | 含义 |
-|---|---|---|
-| `backend` | **3A（合法值仅 `builtin`）** | skill 的**后端类型**；`agent` 取值随 3B 扩展 |
-| `input` / `output` | 3B | 结构化 schema（含兼容规则） |
-| `prompt`（agent 后端） | 3B | agent 后端的提示或 skill 路径 |
-
-> 分期以 [`pipeline.md`](pipeline.md) §4.0 为准；本表仅为摘要，冲突时以该文为准。
+> **「字段 → 子期」映射的唯一定义在 [`capability-seams.md`](capability-seams.md) §9.1**
+> （`input`/`output`、`prompt`、`backend: agent` 的引入子期见该节）；本节不复制该映射。
 
 **字段命名约定**（避免歧义）：`stage.skill` 是 stage 对**已注册 skill id** 的引用；
 `skill.backend` 是 skill 自身的**后端类型**。两者是不同层级概念，不得复用同一字段名。
 
-届时 `skills doctor` 应升级为**校验契约完整性**，并作为流水线的前置约束：
-`stage.skill` 引用不存在的 skill 必须 **fail-closed**（引用的完整性校验由 3A 起生效）。
+## Phase 3B：skill 演进为 capability seam（**3B-1 未实现**）
 
-> 注意：本节是**前瞻设计**。当前 `skills list|doctor` 只校验 `id` / `adapter` / `path`、
-> 目录存在性、`SKILL.md` frontmatter 与路径边界；**不校验 I/O 契约**，因为它还没被定义。
+Phase 3B 把 skill 从「显式声明校验器」升级为 **capability seam**
+（Definition / Provider / Consumer），作为**宿主真实 skill 目录的只读适配层**——
+**不自建第二套 registry**，不安装/复制/改写宿主 skill。
+
+规范定义与对照研究见 [`capability-seams.md`](capability-seams.md)（与 D13）；
+分期**唯一来源**为该文 §9（本文不复制子期表；用户已确认立即执行 3B-0..3B-3，skill seam 属 3B-1/3B-2）。
+
+要点（对齐 dsh，详见 `capability-seams.md` §4–§7）：
+
+- **Provider**：`builtin`（= 3A fixture catalog）/ `filesystem`（显式 roots）/ `opencode-host` / `codex-host`。
+- **渐进披露**：`list()` 只出**目录元数据**（含 `name`/`description`，**不含正文**）；
+  `get()` 才读正文（字段以 [`capability-seams.md`](capability-seams.md) §5 为准）。
+- **裁决**：`rank` 小者胜 → provider 注册序 → 路径字典序；被遮蔽者进 `conflicts`。
+- **失败隔离**：单 provider 失败只跳过 + warning；`complete=false` 不缓存；pipeline 引用缺失 → fail-closed。
+- **安全**：宿主目录用**显式 allowed roots**；逐段拒 symlink、hardlink fail-closed、敏感名拒绝。
+- **迁移**：v1/v2 双读，**默认模板保持 v1**（旧 home 不破）。

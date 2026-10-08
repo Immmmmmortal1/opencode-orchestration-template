@@ -52,3 +52,21 @@ orchagent mcp doctor
 - **拒绝未知字段**：防止拼写错误被静默忽略。
 - 只校验字符串/类型形态，**不校验 URL 可达性**。
 - 输出中**不回显** `env` / `headers` 的值，避免泄露凭据。
+
+## Phase 3B：MCP 演进为 capability seam（**3B-3 未实现**）
+
+Phase 3B 把 MCP 从「registry 声明校验」升级为 **capability seam**
+（Definition / Provider / Consumer），作为宿主 MCP 配置的**只读适配层**。
+
+规范定义与对照研究见 [`capability-seams.md`](capability-seams.md)（与 D13）；
+分期**唯一来源**为该文 §9（本文不复制子期表；用户已确认立即执行 3B-0..3B-3，MCP 目录发现属 3B-3）。
+
+要点：
+
+- **Definition**：`McpResourceRegistry`（合并各 provider 资源）；
+- **Provider**：`static`（fixture）/ `opencode-mcp-config`（只读宿主**配置**，
+  遵守 D6：`OPENCODE_CONFIG` 存在时**只读该路径**，不扫默认配置）；
+- **边界（重要）**：3B-3 **不连接任何 server**，因此 `opencode-mcp-config` 只产出**server 声明**，
+  **不能产出真实 resources**；文档与命令不得把 `static` fixture 资源当作真实宿主资源。
+- **失败隔离**：provider 失败只跳过 + warning；共享能力不因单 server 失败而移除；
+- **非目标**：remote MCP 网络连接与活连接资源读取属 3B-5。

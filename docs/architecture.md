@@ -47,7 +47,8 @@ orchAgent
 │   ├── hooks
 │   ├── skills
 │   ├── mcp
-│   └── knowledge
+│   ├── knowledge
+│   └── pipeline
 └── Runtime State 层
     ├── state
     ├── sessions
@@ -75,13 +76,14 @@ Skill 执行层（Phase 3）
 
 Core 只认识 registry，不写死具体实现。
 
-四类扩展统一通过配置声明：
+五类扩展统一通过配置声明：
 
 ```text
 extensions/hooks.yaml
 extensions/skills.yaml
 extensions/mcp.yaml
 extensions/knowledge.yaml
+extensions/pipeline.yaml
 ```
 
 当前运行时状态为：
@@ -90,10 +92,18 @@ extensions/knowledge.yaml
 hooks: declared + runtime:dryRunOnly
 knowledge: declared + runtime:searchOnly
 skills/mcp: declared + runtime:notImplemented
+pipeline: declared + runtime:builtinOnly
 ```
 
 含义：配置已被索引和校验；hooks 只做 dry-run，knowledge 只允许显式 list/search，
-skills/MCP 尚未执行。任何实现不得把 `declared` 伪装成已运行。
+pipeline 只执行 `builtin` 后端 skill，skills/MCP 尚未执行。
+任何实现不得把 `declared` 伪装成已运行。
+
+> **可插拔能力模型（Phase 3B）**：skills / MCP 将演进为 **capability seam**
+> （Definition / Provider / Consumer 三角色，参考 DeepSeek Harness），
+> 作为宿主真实 skill 目录 / MCP 配置的**只读适配层**，不自建第二套 registry。
+> 设计依据见 [`capability-seams.md`](capability-seams.md) 与 D13；
+> 实现分期见该文 §9。
 
 ## 5. 安装与回滚模型
 
@@ -149,13 +159,18 @@ skills/MCP 尚未执行。任何实现不得把 `declared` 伪装成已运行。
 
 - **真正的多 agent 调度引擎**（动态起 N 个 agent、负载均衡、任务队列、运行时决定调度策略）；
 - hooks 的真实业务执行；
-- skills/MCP 的运行时分发；
+- skills/MCP 的**运行时执行**（**当前已确认的 Phase 3B-0..3B-3** 只做**只读 catalog/config 发现
+  + pipeline 引用接入**，即只读适配宿主真实来源，**不执行 agent backend、不建立 MCP 网络连接**；
+  真实执行仍由宿主负责。3B-5（local MCP）/ 3B-6（agent backend）**尚未排期、需另行确认**，
+  见 [`capability-seams.md`](capability-seams.md) §9/§10）；
 - knowledge 的索引、缓存或自动检索；
 - 远程 marketplace；
 - 凭据管理；
 - 自动迁移现有 orchestrator。
 
-这些是未排期非目标；除非用户重新确认 roadmap，否则不得放入 Phase 2/3。
+这些是未排期非目标；除非用户重新确认 roadmap，否则不得纳入 Phase 2/3。
+**例外**：skills/MCP 条目中的 **3B-5 / 3B-6** 已登记为 Phase 3B **待确认子期**
+（见 [`capability-seams.md`](capability-seams.md) §9），**须经用户确认后**方可实施。
 
 ### 7.1 与 Phase 3 流水线编排的区分（避免误读）
 

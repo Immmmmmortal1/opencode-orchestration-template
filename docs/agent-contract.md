@@ -34,18 +34,20 @@ agent 不得默认读取或复用：
 
 ## 3. Extension 处理规则
 
-agent 必须通过入口配置找到四类 registry：
+agent 必须通过入口配置找到五类 registry：
 
 - hooks
 - skills
 - mcp
 - knowledge
+- pipeline
 
 当前运行时状态：
 
 ```text
 hooks: dryRunOnly
 knowledge: searchOnly
+pipeline: builtinOnly
 skills/mcp: notImplemented
 ```
 
@@ -136,4 +138,6 @@ Phase 3（编排运行时）在此之上增加 **Pipeline 编排 + Skill 执行*
 - **Gate 是纯声明**，其检查逻辑必须由已注册 skill（`gate.evaluator`）执行，禁止内嵌 prompt/脚本；
 - agent 不是一级概念，只是 skill 的一种后端。
 
-权威模型见 [`pipeline.md`](pipeline.md)（设计决策 D12）。Phase 3 尚未开工。
+权威模型见 [`pipeline.md`](pipeline.md)（设计决策 D12）。Phase 3A（Pipeline 定义 + 校验 + builtin-only
+runner）**已实现、审查通过并发布 v0.8.0**；Phase 3B-0（capability seam 设计文档 + D13）**已落**，
+3B-1..3B-3 尚未实现（见 [`capability-seams.md`](capability-seams.md) §9）。

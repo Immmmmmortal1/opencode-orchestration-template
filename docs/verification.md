@@ -254,7 +254,7 @@ python3 -m unittest discover -s tests
 | 文件 | 覆盖 |
 |---|---|
 | `tests/test_install_opencode.py` | 安装幂等、备份目录位置（D8）、install rollback 一次性、opencode link/doctor/unlink/rollback 闭环、`OPENCODE_CONFIG` 强隔离（D6：默认两路径 byte-for-byte 不变且不被扫描）、symlink/dangling symlink、未托管字段拒绝覆盖 |
-| `tests/test_extensions.py` | 四类 runtime 状态（hooks=dryRunOnly / knowledge=searchOnly / skills,mcp=notImplemented）、`--type` 过滤、非对象 registry fail-closed、registry 缺失 |
+| `tests/test_extensions.py` | 五类 runtime 状态（hooks=dryRunOnly / knowledge=searchOnly / pipeline=builtinOnly / skills,mcp=notImplemented）、`--type` 过滤、非对象 registry fail-closed、registry 缺失 |
 | `tests/test_hooks.py` | 默认 list/doctor、run --dry-run planned/skipped、未匹配 event、非法 enabled/type fail-closed、disabled adapter 不掩盖非法 type、unsupported type、未带 `--dry-run` 拒绝、dry-run 无副作用 |
 | `tests/test_knowledge.py` | registry 契约 fail-closed、越界/敏感名（含前导点）/中间段 symlink/硬链接拦截、预算限制（单文件/结果数/行宽/entry/file/累计字节）与多 source 共享预算、local_cli disabled 未执行（marker 证明）、输出超限、超时、argv 无 shell 展开、慢 local_cli 不吃 filesystem 预算 |
 | `tests/test_cli_smoke.py` | 核心命令端到端返回码与 JSON 契约 |
@@ -382,4 +382,27 @@ ORCHAGENT_HOME="$tmp/home" OPENCODE_CONFIG="$tmp/oc.json" ./bin/orchagent pipeli
 契约变更（升级影响）：
 
 - `extensions` 由四类扩为**五类**（新增 `pipeline`）；旧 home 缺 `extensions.pipeline` 时 `config validate` 报缺项，需 `install --force` 或手动补。
-- skill 条目新增 **`backend` 必填**字段，3A 合法值**仅 `builtin`**（`agent` 留 3B）。
+- skill 条目新增 **`backend` 必填**字段，3A 合法值**仅 `builtin`**（`agent` 子期见 [`capability-seams.md`](capability-seams.md) §9.1）。
+
+## Phase 3B-0：Capability Seam 设计 + 文档落地
+
+范围：**纯文档与决策记录**，无代码改动。
+
+交付：
+
+- 新增 `docs/capability-seams.md`（dsh capability seam 对照研究 + 本机宿主机制 + orchAgent 映射 + 分期 + 非目标）；
+- `docs/design-decisions.md` 新增 **D13**（Skill / MCP 采用 capability seam + provider 模型）；
+- `docs/architecture.md` §4 修正为**五类** extension（含 `pipeline`），补 seam 指针与非目标澄清；
+- `docs/skills.md` / `docs/mcp.md` 增加 Phase 3B seam 分期章节；
+- `docs/roadmap.md` 更新 3A 状态（已发布）与 3B 定义（capability seam 分期）。
+
+运行：
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+验证结果：以当前 `python3 -m unittest discover -s tests` 的实际输出为准，不在文档中写死用例数。
+
+说明：3B-0 **不引入任何行为变更**；`skills`/`mcp` 的 `runtime` 仍为 `notImplemented`，
+seam 实现见后续 3B-1..3B-3。

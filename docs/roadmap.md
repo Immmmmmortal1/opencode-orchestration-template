@@ -163,12 +163,12 @@ orchagent skills list|doctor
 
 - Phase 2 adapters 已可 dry-run ✅
 - review 包构造规则已固化 ✅（dev-flow）
-- 测试套件全绿 ✅（153 用例）
+- 测试套件全绿 ✅（以 [`verification.md`](verification.md) 记录的完整测试套件为准，不写死用例数）
 - session/lock/lease 已落盘并通过测试 ✅（D11）
 
 ## Phase 3A：Pipeline 定义 + Session 集成
 
-状态：已实现（builtin-only 最小闭环），待独立审查。规范定义见 [`pipeline.md`](pipeline.md)（唯一来源；本节为摘要，冲突时以该文为准）。
+状态：**已实现、已独立审查通过并发布（v0.8.0）**。规范定义见 [`pipeline.md`](pipeline.md)（唯一来源；本节为摘要，冲突时以该文为准）。
 
 目标：
 
@@ -181,20 +181,30 @@ orchagent skills list|doctor
 
 验收：证明「带门禁和回退边的状态机」端到端可行；**不引入通用引擎**。
 
-## Phase 3B：Skill I/O 契约扩展
+## Phase 3B：Skill / MCP capability seam（可插拔）
 
-状态：未开始。规范定义见 [`pipeline.md`](pipeline.md)。
+状态：**3B-0 已落（文档 + D13），实现未开始**。规范定义见 [`capability-seams.md`](capability-seams.md)（唯一来源；本节为摘要，冲突时以该文为准）。
 
 目标：
 
-- 完整 I/O 契约（`input` / `output`，结构化 schema + 兼容规则，见 [`pipeline.md`](pipeline.md) §4.1）；
-- 支持「上一阶段输出 → 下一阶段输入」接线；
-- 新增 **agent 后端** skill（`prompt`）；
-- 接上 Phase 2C 的 `skills list|doctor`、`mcp list|doctor` 做引用完整性校验。
+- skill 与 MCP 各建一个 **capability seam**（Definition / Provider / Consumer，参考 DeepSeek Harness），
+  作为**宿主真实 skill 目录 / MCP 配置的只读适配层**——**不自建第二套 registry**；
+- provider 合并 / 裁决（rank → 注册序 → 路径序）/ 渐进披露（`list` 出目录、`get` 读正文）/
+  失败隔离（`complete=false` 不缓存、无 snapshot 引用缺失 → fail-closed）；
+- seam 命令（`skills list|doctor` / `mcp list|doctor` / `skills get`）负责 **catalog / config 校验**；
+  `pipeline doctor`（3B-2）负责 `stage.skill` / `gate.evaluator` 对 skill 的**引用完整性**校验
+  （引用不存在或非 `builtin` → fail-closed）。**pipeline 对 MCP resource 的引用契约尚未定义**
+  （待相关子期确认），本文不作承诺。
 
-注意：`backend` 字段**已在 3A 引入并校验**（见 [`pipeline.md`](pipeline.md) §4.0），不在 3B。
+分期：**唯一分期定义见 [`capability-seams.md`](capability-seams.md) §9**（3B-0..3B-6；本处不复制表格）。
+用户已确认的立即执行范围为 **3B-0..3B-3**；3B-4..3B-6 需另行确认排期。
 
-关键约束：3B 只**扩展能力**，**不引入** 3A 尚不存在的 skill 强制边界（那条边界 3A 已有）。
+注意：`backend` 字段**已在 3A 引入并校验**（见 [`pipeline.md`](pipeline.md) §4.0）；3B v2 中后端归属
+`SkillDefinition.execution.backend`，**agent 后端真实执行属 3B-6（未排期，见
+[`capability-seams.md`](capability-seams.md) §9.1）**。
+
+关键约束：3B 只**扩展能力**，**不引入** 3A 尚不存在的 skill 强制边界（那条边界 3A 已有）；
+不安装/复制/改写宿主 skill；不隐式扫描未声明的宿主目录。
 
 ## Phase 3C：路由 + 第一条真实流水线
 

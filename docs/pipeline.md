@@ -2,13 +2,16 @@
 
 本文定义 Phase 3（编排运行时）的核心模型：**用流水线（Pipeline）编排，用 skill 执行。**
 
-**本文是唯一规范源。** 其他文档（`design-decisions.md` D12、`architecture.md`、`roadmap.md`、
-`skills.md`、`agent-contract.md`）可以保留**摘要**（便于就地阅读），但**不得复制完整定义**；
-**任何表述冲突时，一律以本文为准**。
+**在 pipeline 编排模型范围内，本文是唯一规范源。** 其他文档（`design-decisions.md` D12、`architecture.md`、
+`roadmap.md`、`skills.md`、`agent-contract.md`）可以保留**摘要**（便于就地阅读），但**不得复制完整定义**；
+pipeline 编排模型内的**文档间**表述冲突，以本文为准。
+**代码与文档冲突时，一律遵循 [`design-decisions.md`](design-decisions.md) D9（先暂停并让用户确认），本文不例外。**
 
 对应设计决策：[`design-decisions.md`](design-decisions.md) 的 **D12**。
 
-> 本文是**设计**，不是实现。Phase 3 尚未开工；3A/3B/3C 的拆分见第 10 节。
+> 本文既含**设计**也含**已实现**部分。**Phase 3A（第 10.2 节范围）已实现、审查通过并发布 v0.8.0**；
+> 3A 之后的 3B/3C 部分仍为设计（3B-0 设计文档已落，实现未开始，见
+> [`capability-seams.md`](capability-seams.md)）。3A/3B/3C 的拆分见第 10 节。
 
 ## 1. 为什么需要这个模型
 
@@ -118,38 +121,36 @@ Pipeline ──┬── Stage(skill=code-locate)  ──▶ Gate(evaluator=...,
 
 ## 4. Skill 的 I/O 契约（Phase 3 扩展，尚未实现）
 
-### 4.0 字段引入分期（与 3A/3B 对齐，避免自相矛盾）
+### 4.0 字段引入分期
 
-现有（Phase 2C）skill 条目的字段是 `id` / `adapter` / `path`，**没有 `backend`**。
-而 3A 又必须能判定"该 skill 是否为 `builtin`"，因此**不能把 `backend` 拖到 3B**：
+Phase 2C 原有的 skill 条目字段是 `id` / `adapter` / `path`，**没有 `backend`**。
+而 3A 必须能判定"该 skill 是否为 `builtin`"，因此**不能把 `backend` 拖到 3B**。
+**3A 已落地**：`backend` 已补齐为必填字段，合法值**仅 `builtin`**，由 `skills doctor` 校验
+（仍只读写声明，不执行）。
 
-| 字段 | 引入阶段 | 合法值 | 说明 |
-|---|---|---|---|
-| `backend` | **3A** | **仅 `builtin`** | 3A 只接受 `builtin`（用于 `stage.skill` 引用校验） |
-| `backend` 的 `agent` 取值 | 3B | — | 3B 起 `backend` 才允许 `agent` |
-| `input` / `output`（结构化 schema） | 3B | — | 完整 I/O 契约与接线 |
-| `prompt`（agent 后端） | 3B | — | 随 `agent` 后端引入 |
+> **「字段 → 子期」映射的唯一定义在 [`capability-seams.md`](capability-seams.md) §9.1**；
+> 本节不复制该映射，只描述字段语义。
 
 **`adapter` 与 `backend` 的关系**：二者不是替换关系。
 
 - `adapter`（既有）= 该 skill 由**哪一类 provider** 提供（如 `filesystem`）；
-- `backend`（新增）= 该 skill 的**执行方式**（`builtin` 确定性逻辑 / `agent` 提示驱动）。
+- `backend`（3A 引入）= 该 skill 的**执行方式**（`builtin` 确定性逻辑 / `agent` 提示驱动）。
+  `agent` 的**真实执行**属 [`capability-seams.md`](capability-seams.md) §9.1 的 3B-6（未排期）。
 
 一个 `filesystem` adapter 下的 skill 可以是 `builtin`（如解析文件）或 `agent`（如按 prompt 判断）。
-3A 只需把 `backend` 补齐为可判别字段并在 `skills doctor` 中校验其合法性（仍是读写声明，不执行）。
 
-### 4.1 完整 I/O 契约（3B）
+### 4.1 完整 I/O 契约（子期见 `capability-seams.md` §9.1）
 
 | 字段 | 来源 | 含义 |
 |---|---|---|
-| `backend` | **继承自 3A**（3B 起新增 `agent` 取值） | skill 的**后端类型**，非 stage 引用 |
-| `input` | 3B 新增 | 声明需要哪些输入（**结构化 schema**，带版本） |
-| `output` | 3B 新增 | 声明产出什么（**结构化 schema**，带版本） |
-| `prompt` | 3B 新增 | agent 后端的提示或 skill 路径 |
+| `backend` | **继承自 3A** | skill 的**后端类型**，非 stage 引用 |
+| `input` | 待引入（子期见 §9.1） | 声明需要哪些输入（**结构化 schema**，带版本） |
+| `output` | 待引入（子期见 §9.1） | 声明产出什么（**结构化 schema**，带版本） |
+| `prompt` | 待引入（子期见 §9.1） | agent 后端的提示或 skill 路径 |
 
 接线方式：**上一阶段的 output 绑定到下一阶段的 input**。
 
-**schema 兼容规则（3B 必须定义，不得只写"带版本"）**：每条 I/O 需声明 `schema`（标识）与
+**schema 兼容规则（引入该契约的子期必须定义，不得只写"带版本"）**：每条 I/O 需声明 `schema`（标识）与
 `schemaVersion`（版本）；producer 与 consumer 不兼容时 **fail-closed**（拒绝接线，不允许隐式转换）。
 
 ### 4.2 后端与"确定性"不是同一件事（避免过度承诺）
@@ -198,7 +199,8 @@ gate_key = (session_id, pipeline_revision, run_id, stage_id, attempt_no, gate_id
 （`pass`/`fail`）、`evidence_ref`（证据引用）、`schemaVersion`、以及失效时的 `invalidated_reason`。
 
 3A 尚无 artifact store，因此结论以**内联 `evidence`** 承载 fixture 级证据，同时写入
-`evidenceRef: null`；`evidenceRef` 的引用格式留待 3B 引入 artifact store 时定义。
+`evidenceRef: null`；其引用格式留待 3B-4 引入 artifact store 时定义（见
+[`capability-seams.md`](capability-seams.md) §9.1）。
 
 结论必须**原子写入**（复用 D11 的原子写），不得出现"gate 已通过但结论未落盘"的中间态。
 
@@ -350,7 +352,7 @@ runner 在 stage/gate 边界续约失败属于失权事件，不再进入回退�
 | 子阶段 | 内容 | 验证目标 |
 |---|---|---|
 | **3A** | Pipeline 定义 + session 集成；阶段/门禁/回退边 + §5 回退语义；`stage.skill` 与 `gate.evaluator` 均引用**已注册 skill**；补齐最小 `backend` 字段判别（见 §4.0） | 证明「带门禁和回退边的状态机」可行，**不碰通用引擎**；**3A 起就强制 skill 注册约束** |
-| **3B** | 扩展完整 I/O 契约（`input`/`output` + schema 兼容规则）+ **agent 后端** + Registry 校验 | 扩展能力，**不引入** 3A 尚不存在的 skill 强制边界 |
+| **3B** | Skill / MCP capability seam（可插拔）+ 完整 I/O 契约 + agent 后端。**子期划分以 [`capability-seams.md`](capability-seams.md) §9 为唯一定义**（本文不复制子期表）；用户已确认立即执行 3B-0..3B-3 | 扩展能力，**不引入** 3A 尚不存在的 skill 强制边界 |
 | **3C** | 路由 + **第一条真实流水线**（bug 修复）端到端 | 用真实流水线检验模型 |
 
 **3A 即可验证核心机制**（含第 5 节回退边语义），无需先建通用引擎。
@@ -373,13 +375,14 @@ runner 在 stage/gate 边界续约失败属于失权事件，不再进入回退�
 只执行 `backend=builtin` 且已注册的 skill；**不启动 agent、不启动 MCP、不做真实业务**；
 不做完整 I/O schema 接线；无后台 daemon、无动态调度。
 
-**3A 明确不做**：agent 后端（3B）、完整 I/O schema 与接线（3B）、路由选择（3C）、真实流水线（3C）。
+**3A 明确不做**：agent 后端（3B-6，未排期）、完整 I/O schema 与接线（3B-4，未实现）（子期见 [`capability-seams.md`](capability-seams.md) §9.1）、
+路由选择（3C）、真实流水线（3C）。
 
 ### 10.2 3A 引入的契约变更（升级影响）
 
 - `extensions` 由**四类扩为五类**（新增 `pipeline`）：`orchAgent.yaml` 的 `extensions.pipeline`
   成为必填项。**旧安装的 home 需 `install --force` 或手动补该字段**，否则 `config validate` 报缺项。
-- skill 条目新增 **`backend` 字段且必填**，3A 合法值**仅 `builtin`**（`agent` 留 3B）。
+- skill 条目新增 **`backend` 字段且必填**，3A 合法值**仅 `builtin`**（`agent` 子期见 [`capability-seams.md`](capability-seams.md) §9.1）。
 - 终止需要**原子动作**：因 D11 终态不可再变更，`session.py` 需新增 `finalize_session` 原语，
   把「写终态 + 释放 lease」放在同一个受 lock/lease 保护的临界区内。
 
