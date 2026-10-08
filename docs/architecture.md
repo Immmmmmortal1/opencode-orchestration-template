@@ -58,8 +58,18 @@ orchAgent
 ```
 
 `sessions` / `locks` / `leases` 的权威协议见
-[`session-lock-lease.md`](session-lock-lease.md)（设计决策 D11）；本阶段只落协议与最小原语，
-不实现 workflow / dispatch / monitor。
+[`session-lock-lease.md`](session-lock-lease.md)（设计决策 D11）。
+
+Phase 3 在此之上增加 **Pipeline 层**（编排）与 **Skill 执行层**（最小执行单元）：
+
+```text
+Pipeline 层（Phase 3）
+    └── 阶段 + 门禁 + 回退边：只编排，不含执行逻辑
+Skill 执行层（Phase 3）
+    └── 最小执行单元：单一业务能力，纯输入→输出
+```
+
+**权威模型见 [`pipeline.md`](pipeline.md)（设计决策 D12）**；本节仅为分层示意，表述冲突时以该文为准。
 
 ## 4. Core 与 Extension Registry
 
@@ -137,7 +147,7 @@ skills/MCP 尚未执行。任何实现不得把 `declared` 伪装成已运行。
 
 当前阶段不做：
 
-- 真正的多 agent 调度引擎；
+- **真正的多 agent 调度引擎**（动态起 N 个 agent、负载均衡、任务队列、运行时决定调度策略）；
 - hooks 的真实业务执行；
 - skills/MCP 的运行时分发；
 - knowledge 的索引、缓存或自动检索；
@@ -146,3 +156,16 @@ skills/MCP 尚未执行。任何实现不得把 `declared` 伪装成已运行。
 - 自动迁移现有 orchestrator。
 
 这些是未排期非目标；除非用户重新确认 roadmap，否则不得放入 Phase 2/3。
+
+### 7.1 与 Phase 3 流水线编排的区分（避免误读）
+
+上表的「多 agent 调度引擎」指**动态调度**；Phase 3 要做的是**静态编排**，两者不同：
+
+| | 多 agent 调度引擎（非目标） | Pipeline 编排（Phase 3 目标） |
+|---|---|---|
+| 阶段 | 运行时动态决定 | **定义时固定** |
+| agent 数量 | 动态起 N 个 | 由流水线静态决定 |
+| 调度策略 | 负载均衡 / 队列 | 无；按序推进 |
+| 执行体 | 任意 | **只能是已注册 skill** |
+
+权威模型见 [`pipeline.md`](pipeline.md)（D12）。本节措辞用于区分二者，凡涉及第二列的能力仍为非目标。

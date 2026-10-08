@@ -128,3 +128,12 @@ orchagent skills doctor
 - skills 路径必须留在 `ORCHAGENT_HOME` 内，symlink 与敏感名 fail-closed。
 
 真实执行能力必须晚于 dry-run / 只读校验，并且要有独立验证命令。
+
+Phase 3（编排运行时）在此之上增加 **Pipeline 编排 + Skill 执行**两层模型：
+
+- **Pipeline** = 阶段 + 门禁 + 回退边，只负责编排；
+- **`stage.skill` 只能指向已注册 skill**，引用不存在的 skill 必须 **fail-closed**（`builtin` 是 skill 的后端类型，不是绕过 skill 的通道）；
+- **Gate 是纯声明**，其检查逻辑必须由已注册 skill（`gate.evaluator`）执行，禁止内嵌 prompt/脚本；
+- agent 不是一级概念，只是 skill 的一种后端。
+
+权威模型见 [`pipeline.md`](pipeline.md)（设计决策 D12）。Phase 3 尚未开工。

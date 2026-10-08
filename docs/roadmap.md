@@ -27,7 +27,7 @@
 
 ## Phase 1.1：架构真相源落盘
 
-状态：当前阶段。
+状态：已完成。
 
 目标：
 
@@ -62,7 +62,7 @@ orchagent hooks run session.start --dry-run
 
 ## Phase 2B：Knowledge Adapter
 
-状态：已实现最小闭环并通过本地验证，待独立审查。
+状态：已完成（tag `v0.3.0`，独立审查 6 轮后 pass）。
 
 目标：
 
@@ -101,7 +101,7 @@ orchagent knowledge search "关键词"
 
 ## Phase 2C：MCP / Skills Registry 校验
 
-状态：已实现并通过本地验证，待独立审查。详见 [`mcp.md`](mcp.md) / [`skills.md`](skills.md)。
+状态：已完成（tag `v0.5.0`，独立审查 4 轮后 pass）。详见 [`mcp.md`](mcp.md) / [`skills.md`](skills.md)。
 
 目标：
 
@@ -130,23 +130,82 @@ orchagent skills list|doctor
 
 - 测试套件全绿。
 
-## Phase 3：编排运行时
+## Phase 3 前置：Session / Lock / Lease 原语
+
+状态：已完成（tag `v0.6.0`，独立审查 6 轮后 pass）。详见 [`session-lock-lease.md`](session-lock-lease.md) 与设计决策 D11。
 
 目标：
 
-- workflow/state machine；
-- agent dispatch；
-- monitor；
-- verify；
-- review handoff；
-- result aggregation。
+- session 状态持久化（原子写、终态保护）；
+- 本地互斥锁（`fcntl.flock`，崩溃由内核自动释放）；
+- lease 所有权 + fenced token（防旧持有者覆盖新持有者）。
 
-前置条件：
+说明：本阶段只落协议与最小原语，**不接 CLI、不改 doctor**、不实现 workflow / dispatch / monitor。
+
+## Phase 3：编排运行时
+
+目标（按 [`pipeline.md`](pipeline.md) 的模型表述）：
+
+- **Pipeline**：阶段 + 门禁 + 回退边的定义与执行；
+- **Skill 执行**：stage 的执行体只能是已注册 skill；
+- **门禁 / 验证**：证据与验收条件逐条比对；
+- **审查交接**：把需要审查的产出交给审查者；
+- **结果汇总**：阶段产出与门禁结论落入 session；
+- **路由**：按任务类型选择流水线。
+
+> 早期表述为 `workflow/state machine`、`agent dispatch`、`monitor`、`verify`、`review handoff`、
+> `result aggregation`。经用户确认（2026-09-30）统一按上表新模型表述：**agent 不作为一级概念**
+> （agent 只是 skill 的一种后端），编排由 Pipeline 静态定义。
+
+权威模型：**[`pipeline.md`](pipeline.md)**（Pipeline 组合 + Skill 执行，设计决策 D12）。
+
+前置条件（全部满足）：
 
 - Phase 2 adapters 已可 dry-run ✅
 - review 包构造规则已固化 ✅（dev-flow）
-- 测试套件全绿 ✅
-- session/lock/lease 设计已落盘并通过测试 ✅（见 [`session-lock-lease.md`](session-lock-lease.md) 与 D11）
+- 测试套件全绿 ✅（153 用例）
+- session/lock/lease 已落盘并通过测试 ✅（D11）
 
-> Phase 3 本体（workflow/state machine、agent dispatch、monitor、verify、review handoff、
-> result aggregation）尚未开始；上述前置已完成，进入 Phase 3 前需先确认其范围边界。
+## Phase 3A：Pipeline 定义 + Session 集成
+
+状态：未开始。规范定义见 [`pipeline.md`](pipeline.md)（唯一来源；本节为摘要，冲突时以该文为准）。
+
+目标：
+
+- Pipeline = 阶段 + 门禁 + 回退边 的定义与校验；
+- 阶段状态推进落 `session`（D11），并发由 lock/lease 保护；
+- `stage.skill` 引用 **`builtin` 后端的已注册 skill**；
+- **回退边语义**（产出失效与重算、`maxAttempts`、终止决策表、lock/lease 释放边界，见 [`pipeline.md`](pipeline.md) §5）。
+
+关键约束：**「stage 必须引用已注册 skill」从 3A 第一天就生效**——3A **不是**"暂时允许非 skill 执行"。
+
+验收：证明「带门禁和回退边的状态机」端到端可行；**不引入通用引擎**。
+
+## Phase 3B：Skill I/O 契约扩展
+
+状态：未开始。规范定义见 [`pipeline.md`](pipeline.md)。
+
+目标：
+
+- 完整 I/O 契约（`input` / `output`，结构化 schema + 兼容规则，见 [`pipeline.md`](pipeline.md) §4.1）；
+- 支持「上一阶段输出 → 下一阶段输入」接线；
+- 新增 **agent 后端** skill（`prompt`）；
+- 接上 Phase 2C 的 `skills list|doctor`、`mcp list|doctor` 做引用完整性校验。
+
+注意：`backend` 字段**已在 3A 引入并校验**（见 [`pipeline.md`](pipeline.md) §4.0），不在 3B。
+
+关键约束：3B 只**扩展能力**，**不引入** 3A 尚不存在的 skill 强制边界（那条边界 3A 已有）。
+
+## Phase 3C：路由 + 第一条真实流水线
+
+状态：未开始。
+
+目标：
+
+- 按任务类型路由到不同 pipeline；
+- 以 **bug 修复**为第一条端到端流水线。
+
+验收：用真实流水线检验模型；据此判断是否需要抽象（**不早于 3 条流水线**）。
+
+> 非目标见 [`architecture.md`](architecture.md) §7/§7.1 与 [`pipeline.md`](pipeline.md) §11：
+> 通用 workflow DSL、动态调度、后台 daemon、绕过 skill 的自由发挥（含把自由逻辑包装成 Gate）。

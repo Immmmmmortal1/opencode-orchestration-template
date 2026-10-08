@@ -11,6 +11,8 @@
 - [`docs/agent-contract.md`](docs/agent-contract.md)
 - [`docs/roadmap.md`](docs/roadmap.md)
 - [`docs/verification.md`](docs/verification.md)
+- [`docs/session-lock-lease.md`](docs/session-lock-lease.md)（Phase 3 前置协议，D11）
+- [`docs/pipeline.md`](docs/pipeline.md)（Phase 3 编排模型，D12）
 
 这些文档是当前架构真相源，用于防止后续实现偏离已确认方向。
 

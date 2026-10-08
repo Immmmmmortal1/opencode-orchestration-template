@@ -69,3 +69,27 @@ frontmatter 采用**受限语法**（不引入 YAML 依赖，只支持 `key: val
 - `root` 不存在但存在 enabled 条目 → `error`
 - 条目 `enabled: false` → 不要求目录存在
 - 输出不回显 `description` 全文，避免超长/敏感内容进入 JSON
+
+## Phase 3 扩展：Skill 的 I/O 契约（**尚未实现**）
+
+Phase 3 会把 skill 作为流水线的**最小执行单元**（见 [`pipeline.md`](pipeline.md) 与 D12），
+因此 skill 条目需要声明 I/O，才能把「上一阶段输出 → 下一阶段输入」接线。
+
+拟扩展字段分期（**当前代码尚未实现**）：
+
+| 字段 | 引入阶段 | 含义 |
+|---|---|---|
+| `backend` | **3A（合法值仅 `builtin`）** | skill 的**后端类型**；`agent` 取值随 3B 扩展 |
+| `input` / `output` | 3B | 结构化 schema（含兼容规则） |
+| `prompt`（agent 后端） | 3B | agent 后端的提示或 skill 路径 |
+
+> 分期以 [`pipeline.md`](pipeline.md) §4.0 为准；本表仅为摘要，冲突时以该文为准。
+
+**字段命名约定**（避免歧义）：`stage.skill` 是 stage 对**已注册 skill id** 的引用；
+`skill.backend` 是 skill 自身的**后端类型**。两者是不同层级概念，不得复用同一字段名。
+
+届时 `skills doctor` 应升级为**校验契约完整性**，并作为流水线的前置约束：
+`stage.skill` 引用不存在的 skill 必须 **fail-closed**（引用的完整性校验由 3A 起生效）。
+
+> 注意：本节是**前瞻设计**。当前 `skills list|doctor` 只校验 `id` / `adapter` / `path`、
+> 目录存在性、`SKILL.md` frontmatter 与路径边界；**不校验 I/O 契约**，因为它还没被定义。
