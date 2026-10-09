@@ -53,7 +53,8 @@
   - Pipeline = 阶段 + 门禁 + 回退边；`stage.skill` 与 `gate.evaluator` **只能引用已注册 skill**（fail-closed）
   - skill 新增 `backend` 必填字段（3A 仅 `builtin`）；`extensions` 由四类扩为**五类**（+pipeline）
   - 终止决策表、产出失效、attempt 额度、稳定键（stage_key/gate_key）均按 `docs/pipeline.md` §5 落实
-- 未实现：skills/MCP runtime、knowledge 索引、Phase 3B 实现（3B-1..3B-3）、Phase 3C（路由 + 真实流水线）
+- 未实现：skills/MCP runtime、knowledge 索引、Phase 3C（路由 + 真实流水线）
+- Phase 3B 的分期与状态**以 [`docs/capability-seams.md`](docs/capability-seams.md) §9 为唯一来源**（此处不重复断言）
 - Phase 3B-0（**仅文档**）：`docs/capability-seams.md`（参考 DeepSeek Harness 的 **capability seam**
   （Definition/Provider/Consumer）+ 本机 opencode/codex 宿主机制实证 + orchAgent 映射）+ 设计决策 **D13**
   - 定位：orchAgent 是宿主真实 skill 目录 / MCP 配置的**只读适配层**，**不自建第二套 registry**
