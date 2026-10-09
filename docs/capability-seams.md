@@ -1,6 +1,8 @@
 # Capability Seams 与 Provider 模型
 
-> Phase 3B 各子期状态**以 §9 为唯一来源**。
+> 状态：**已暂停（方向调整，见下）；3B-0 设计已落（本文 + D13），3B-1 已撤销**。
+>
+> ⚠️ **2026-10-08 方向调整（用户已确认）**：**skill / MCP 归宿主（opencode / codex）机制，编排层不关心**。据此 **3B-1（skill seam）已撤销**（`v0.9.0` 回退）；本设计（含 3B 子期）**暂停，待按「agent 编排」重新设计**。本文暂留作历史参考，**是否正式退役另行确认**。
 > 本文是 Phase 3B 的**规范来源**（与 [`pipeline.md`](pipeline.md) 同级）。
 > **职责边界**：本文管 seam / provider / skill 的 **I/O 契约与字段分期**（§9 / §9.1）；
 > `pipeline.md` 管 **pipeline 编排模型**（阶段 / 门禁 / 回退边）。
@@ -178,8 +180,7 @@ orchAgent 是 **Python 3.14 标准库 CLI（零第三方依赖、静态、文件
   调用策略（`modelInvocable` / `userInvocable`）、`provider`、`source`、`rank`；
 - Provider `get(candidate)` 才返回**正文**（`SKILL.md` 全文）；
 - CLI `skills list` 默认只渲染目录子集（`id` / `name` / `description` / `backend` / `provider`），
-  **不渲染正文**；`skills get <id>` 才渲染正文，正文最多返回 256 KiB，并始终返回
-  `truncated` 与真实文件大小 `sizeBytes`；
+  **不渲染正文**；`skills get <id>` 才渲染正文，并截断超长内容避免大 JSON；
 - 加载时名称与 candidate 不符 → 拒绝并失效该 provider 目录（对齐 dsh）。
 
 > 统一契约：**目录**（`list`）永远不含正文；**正文**只经 `get` 返回。
@@ -193,8 +194,6 @@ orchAgent 是**一次性进程**，不能只靠内存事件，因此：
   - `filesystem`：roots + 文件路径 + `mtime_ns` + `size` 的 hash；
   - `builtin`：catalog 版本 hash；
   - 其它 provider（未来类型）：由 provider 自报 revision（本契约对未来 provider 同样适用）。
-- `filesystem` catalog 仅读取最多 8 KiB 的 frontmatter；超限或未闭合即拒绝候选并标记
-  `complete=false`，正文只在 `get` 阶段有界读取。
 - resolved snapshot **默认不写**；仅显式 `--update-cache`（或 pipeline 前置解析）写入
   `state/skills.snapshot.json`（**待决点 3 已定：默认只读不写**）。
 - provider 失败：
@@ -208,12 +207,6 @@ orchAgent 是**一次性进程**，不能只靠内存事件，因此：
 - 路径必须锁在**显式 allowed roots** 内（宿主目录不在 `ORCHAGENT_HOME` 内，
   因此引入 allowed-roots 模型，**不再**简单沿用「必须在 home 内」）。
 - 路径链**任一段**为 symlink → 拒绝；hardlink（`st_nlink > 1`）→ fail-closed。
-  - **平台豁免（唯一例外，已限定）**：macOS 上 `/var`、`/tmp`、`/etc` 由系统拥有，
-    本身是指向 `/private/*` 的**系统别名**，不属于「配置声明者可控」范围，故在
-    **精确匹配这三条顶层路径**时放行；其**之下**的任一段 symlink 仍会被逐段拒绝
-    （即豁免不可被用于越界；审查已确认无可用反例）。仅适用 macOS；其他平台无豁免。
-  - 信任前提：`allowed roots` / `allowed bases` 的**声明者**是可信的（配置由用户本人维护）；
-    被豁免路径的**内容**仍受 allowed-roots 与敏感名约束。
 - 敏感名（`secrets` / `api-keys` / `mail` / `accounts`，含前导点）→ 拒绝。
 - **不隐式扫描未声明的宿主目录**（待决点 2 已定：必须显式声明 root）。
 - 不回显 `env` / `headers` / secrets。
@@ -238,16 +231,15 @@ Phase 3B 的**唯一分期定义**（其他文档（`pipeline.md` §4.0/§10、`
 | 期 | 交付 | 状态 |
 |---|---|---|
 | **3B-0** | 本文 + `architecture.md` 修正五类 + D13 + 文档一致性 | **已落（本文）** |
-| **3B-1** | **skill seam 只读 catalog**：`skill_seam.py` + `skill_providers.py` + v1/v2 loader + `skills get` | **已实现** |
+| **3B-1** | **skill seam 只读 catalog**：`skill_seam.py` + `skill_providers.py` + v1/v2 loader + `skills get` | 未实现 |
 | **3B-2** | pipeline 接入 resolved skill catalog（**仍 builtin-only run**） | 未实现 |
 | **3B-3** | **MCP seam：server / config 目录发现（只读）** + 资源注册表**接口**（仅 `static` fixture 有真实资源）；**不联网、不起进程** | 未实现 |
 | **3B-4** | 完整 **I/O 契约**（`input` / `output`）接线（对齐 [`pipeline.md`](pipeline.md) §4.1） | 未实现 |
 | 3B-5 | （后置）local MCP client + **活连接 resource registry**（真实 `mcp resources list`） | 未排期 |
 | 3B-6 | （后置）**agent backend 真实执行**（`backend: agent` / `prompt`） | 未排期 |
 
-> **用户已确认立即执行的范围 = 3B-0 .. 3B-3**（"先落 再实现真正可插拔"）。
-> 3B-4 .. 3B-6 需另行确认排期；本文列出它们只为**消除文档间"3B 含 I/O / agent"的歧义**，
-> **不构成承诺**。
+> ⚠️ **原「用户已确认立即执行 3B-0..3B-3」的承诺已随 2026-10-08 方向调整作废**：
+> skill / MCP 归宿主机制，编排层不关心；3B-1 已撤销，本表暂停待重设。
 
 ### 9.1 字段 → 子期映射（**唯一来源**）
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from orchagent.skills import MAX_FRONTMATTER_BYTES, doctor_skills, list_skills
+from orchagent.skills import doctor_skills, list_skills
 
 from tests.helpers import IsolatedEnv
 
@@ -264,34 +264,6 @@ class SkillsTests(unittest.TestCase):
         self.assertEqual("Sample", listed["skills"][0]["name"])
         self.assertTrue(listed["skills"][0]["descriptionPresent"])
         self.assertFalse(any(check["level"] == "error" for check in diagnosed["checks"]))
-
-    def test_large_body_does_not_affect_v1_frontmatter_read(self) -> None:
-        self.create_skill(
-            frontmatter="---\nname: Sample\ndescription: A sample skill\n---\n"
-            + ("x" * (MAX_FRONTMATTER_BYTES * 4))
-        )
-        self.write_registry(registry(skills=[skill()]))
-
-        listed = list_skills(self.env.home)
-
-        self.assertEqual("ok", listed["status"])
-        self.assertEqual("Sample", listed["skills"][0]["name"])
-
-    def test_v1_frontmatter_over_limit_is_structured_error(self) -> None:
-        # 用固定字面量（不引用实现常量）撑过 8192 上限，避免测试与实现共用同一常量而互相掩盖。
-        extra = "\n".join(f"extra{index}: value" for index in range(600))
-        frontmatter = "---\nname: Sample\ndescription: A sample skill\n" + extra + "\n---\nBody\n"
-        self.assertGreater(len(frontmatter.encode("utf-8")), 8192)
-        self.create_skill(frontmatter=frontmatter)
-        self.write_registry(registry(skills=[skill()]))
-
-        listed = list_skills(self.env.home)
-        ok, diagnosed = doctor_skills(self.env.home)
-
-        self.assertEqual("error", listed["status"])
-        self.assertFalse(ok)
-        self.assertTrue(any("exceeds" in item["message"] for item in listed["checks"]))
-        self.assertTrue(any("exceeds 8192 bytes" in item["message"] for item in diagnosed["checks"]))
 
     def test_adapter_root_outside_home_is_rejected(self) -> None:
         self.assert_registry_error(registry(adapters=[adapter(str(self.env.external_dir))]))

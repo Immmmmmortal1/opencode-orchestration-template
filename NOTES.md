@@ -39,7 +39,6 @@
 | v0.8.0 | Phase 3A：pipeline registry 校验 + builtin-only runner |
 | v0.8.1 | 项目记忆补充 Phase 3A |
 | v0.8.2 | Phase 3B-0：capability seam 设计文档 + D13（纯文档）|
-| v0.9.0 | Phase 3B-1：skill capability seam 只读 catalog（skill_seam/skill_providers/v2 registry/CLI get+providers）|
 
 - Phase 1 安装闭环：`install` / `rollback` / `doctor` / `config validate` / `extensions list` / `opencode link|unlink|rollback`
 - Phase 2A：`hooks list` / `hooks doctor` / `hooks run <event> --dry-run`（未带 `--dry-run` 必须失败）
@@ -56,24 +55,11 @@
   - 终止决策表、产出失效、attempt 额度、稳定键（stage_key/gate_key）均按 `docs/pipeline.md` §5 落实
 - 未实现：skills/MCP runtime、knowledge 索引、Phase 3C（路由 + 真实流水线）
 - Phase 3B 的分期与状态**以 [`docs/capability-seams.md`](docs/capability-seams.md) §9 为唯一来源**（此处不重复断言）
-- Phase 3B-1（v0.9.0，**已实现**）：skill capability seam 只读 catalog
-  - `orchagent/skill_seam.py`：`SkillRegistry` + `SkillProvider` 协议；裁决（rank→注册序→候选序）、
-    渐进披露（`snapshot` 无正文 / `get` 才读）、失败隔离（异常/非法候选只跳过；`complete=False` 不缓存）、
-    **`register()` 返回幂等 disposer**（对象同一性）；provider 可声明 `name_pattern`
-  - `orchagent/skill_providers.py`：`builtin`（点号命名空间）/ `filesystem`（显式 roots+allowedBases）/
-    `opencode-host` / `codex-host`（默认 roots 需显式 opt-in）；安全：allowed-roots、**逐段** symlink
-    （含 base 父级；仅 macOS `/var` `/tmp` `/etc` 系统别名豁免）、hardlink、敏感名、有界读取
-    （frontmatter ≤8KiB、正文 ≤256KiB 且返回 `truncated`/`sizeBytes`）
-  - `orchagent/skills.py`：**v2 registry loader**（严格 fail-closed；`overrides` 仅空数组）+
-    `get_skill` / `list_skill_providers`；**v1 行为逐字节不变**
-  - `orchagent/cli.py`：`skills get <name>` / `skills providers`
-  - 测试 193→269；**5 轮独立审查**（R5 双轴 pass），变异验证覆盖关键规则
-  - 未做：pipeline 接入（3B-2）、MCP（3B-3）、快照落盘缓存、`overrides` 语义
 - Phase 3B-0（**仅文档**）：`docs/capability-seams.md`（参考 DeepSeek Harness 的 **capability seam**
   （Definition/Provider/Consumer）+ 本机 opencode/codex 宿主机制实证 + orchAgent 映射）+ 设计决策 **D13**
   - 定位：orchAgent 是宿主真实 skill 目录 / MCP 配置的**只读适配层**，**不自建第二套 registry**
   - 分期**唯一来源** = `capability-seams.md` §9（3B-0..3B-6）；字段→子期映射唯一来源 = §9.1
-  - 用户已确认立即执行 **3B-0..3B-3**；3B-4（I/O 契约）/3B-5（local MCP）/3B-6（agent backend）需另行确认
+  - ⚠️ **2026-10-08 方向调整**：skill / MCP 归宿主机制，编排层不关心；**3B-1 已撤销**，本分期暂停（见 `docs/capability-seams.md` 顶部说明）
   - 关键边界：3B-3 **不连 MCP server**，故不产出真实 resources（真实资源属 3B-5）
   - 文档治理：9 处文档由「四类」修正为**五类** extension；分期表/字段映射去重为**单一真相源 + 指针**
   - 代码与文档冲突时遵循 **D9**（暂停并让用户确认）
@@ -92,8 +78,8 @@ python3 -m unittest discover -s tests
 
 ## 已知缺口 / 待办
 
-- [ ] Phase 3B 实现：3B-1 skill seam 只读 → 3B-2 pipeline 接入 → 3B-3 MCP 目录发现（用户已确认范围）
-- [ ] Phase 3B 待确认：3B-4 I/O 契约 / 3B-5 local MCP / 3B-6 agent backend
+- [ ] **方向调整（2026-10-08）**：skill / MCP 归宿主（opencode / codex）机制，**编排层不关心**。3B-1 skill seam 已撤销（`v0.9.0` 回退）。编排层聚焦 **agent 编排**（待重新设计）
+- [ ] 3B-0 的 capability seam 设计（`docs/capability-seams.md` / D13）是否同步退役 —— 待用户定
 - [ ] Phase 3C：路由 + 第一条真实流水线
 
 ## 开发流程约束

@@ -7,20 +7,13 @@ from typing import Any
 
 from .config import extension_registry_paths, read_text_config
 from .paths import DEFAULT_HOME
-from .skill_seam import SkillRegistry
 
 
 SUPPORTED_ADAPTER_TYPES = {"filesystem"}
 REGISTRY_FIELDS = {"version", "adapters", "skills"}
 ADAPTER_FIELDS = {"id", "type", "enabled", "root"}
 SKILL_FIELDS = {"id", "adapter", "path", "enabled", "backend"}
-V2_REGISTRY_FIELDS = {"version", "providers", "overrides"}
-V2_PROVIDER_TYPES = {"builtin", "filesystem", "opencode-host", "codex-host"}
-V2_PROVIDER_COMMON_FIELDS = {"id", "type", "enabled", "rank"}
-V2_PROVIDER_PATH_FIELDS = {"roots", "allowedBases", "source"}
-V2_PROVIDER_HOST_FIELDS = V2_PROVIDER_PATH_FIELDS | {"useDefaultRoots"}
 SENSITIVE_PATH_PARTS = {"secrets", "api-keys", "mail", "accounts"}
-MAX_FRONTMATTER_BYTES = 8192
 
 
 def skills_registry_path(home: Path = DEFAULT_HOME) -> Path:
@@ -106,202 +99,6 @@ def _load_registry(home: Path) -> tuple[Path, dict[str, Any] | None, str | None]
     return path, registry, None
 
 
-def _read_registry_root(home: Path) -> tuple[Path, dict[str, Any] | None, str | None]:
-    """只读取 registry 根对象，不预先套用 v1 schema。"""
-    try:
-        path = skills_registry_path(home)
-    except Exception as exc:  # noqa: BLE001
-        return _registry_fallback_path(home), None, f"failed to resolve skills registry path: {exc}"
-    try:
-        registry = read_text_config(path)
-    except Exception as exc:  # noqa: BLE001
-        return path, None, f"failed to read skills registry: {exc}"
-    if not isinstance(registry, dict):
-        return path, None, "skills registry root must be an object"
-    return path, registry, None
-
-
-def _v2_string_list(value: Any, field: str, provider_id: str) -> tuple[list[str] | None, str | None]:
-    if not isinstance(value, list) or not value:
-        return None, f"provider_invalid: skills provider {provider_id} {field} must be a non-empty string list"
-    if any(not isinstance(item, str) or not item.strip() for item in value):
-        return None, f"provider_invalid: skills provider {provider_id} {field} must be a non-empty string list"
-    return value, None
-
-
-def _v2_optional_string_list(
-    provider: dict[str, Any], field: str, provider_id: str
-) -> tuple[list[str], str | None]:
-    if field not in provider:
-        return [], None
-    value = provider[field]
-    if not isinstance(value, list):
-        return [], f"provider_invalid: skills provider {provider_id} {field} must be a string list"
-    if any(not isinstance(item, str) or not item.strip() for item in value):
-        return [], f"provider_invalid: skills provider {provider_id} {field} must be a string list"
-    return value, None
-
-
-def _v2_paths(values: list[str]) -> list[Path]:
-    """v2 路径由 registry 显式授权，只做变量和用户目录展开。"""
-    return [Path(os.path.expanduser(os.path.expandvars(value))) for value in values]
-
-
-def load_skill_registry_v2(
-    home: Path = DEFAULT_HOME,
-) -> tuple[SkillRegistry | None, list[dict[str, Any]] | None, str | None]:
-    """读取 v2 registry 并构建 SkillRegistry。"""
-    _, data, error = _read_registry_root(home)
-    if error:
-        return None, None, error
-    assert data is not None
-
-    unknown_fields = sorted(set(data) - V2_REGISTRY_FIELDS)
-    if unknown_fields:
-        return None, None, f"registry_unknown_fields: {', '.join(unknown_fields)}"
-    version = data.get("version")
-    if isinstance(version, bool) or not isinstance(version, int) or version != 2:
-        return None, None, "registry_version_invalid: skills registry version must be integer 2"
-    providers = data.get("providers")
-    if not isinstance(providers, list):
-        return None, None, "providers_invalid: skills providers must be a list"
-    overrides = data.get("overrides")
-    if not isinstance(overrides, list):
-        return None, None, "overrides_invalid: skills overrides must be a list"
-    if overrides:
-        return None, None, "overrides_not_supported: skills overrides must be empty in 3B-1"
-
-    # 延迟导入，避免 skill_providers 复用本模块安全读取函数时形成循环导入。
-    from .skill_providers import (  # noqa: PLC0415
-        BuiltinSkillProvider,
-        CodexHostSkillProvider,
-        FilesystemSkillProvider,
-        OpencodeHostSkillProvider,
-    )
-
-    registry = SkillRegistry()
-    providers_meta: list[dict[str, Any]] = []
-    provider_ids: set[str] = set()
-    for index, provider in enumerate(providers):
-        if not isinstance(provider, dict):
-            return None, None, f"provider_invalid: skills provider at index {index} must be an object"
-        provider_id = provider.get("id")
-        if not isinstance(provider_id, str) or not provider_id.strip():
-            return None, None, f"provider_invalid: skills provider at index {index} id must be non-empty string"
-        if provider_id in provider_ids:
-            return None, None, f"provider_id_duplicate: {provider_id}"
-        provider_type = provider.get("type")
-        if provider_type not in V2_PROVIDER_TYPES:
-            return None, None, f"provider_type_invalid: skills provider {provider_id} has unsupported type"
-        enabled = provider.get("enabled")
-        if not isinstance(enabled, bool):
-            return None, None, f"provider_invalid: skills provider {provider_id} enabled must be boolean"
-        rank = provider.get("rank")
-        if isinstance(rank, bool) or not isinstance(rank, int) or rank < 0:
-            return None, None, f"provider_invalid: skills provider {provider_id} rank must be non-negative integer"
-
-        allowed_fields = set(V2_PROVIDER_COMMON_FIELDS)
-        if provider_type == "filesystem":
-            allowed_fields |= V2_PROVIDER_PATH_FIELDS
-        elif provider_type in {"opencode-host", "codex-host"}:
-            allowed_fields |= V2_PROVIDER_HOST_FIELDS
-        unknown_provider_fields = sorted(set(provider) - allowed_fields)
-        if unknown_provider_fields:
-            return None, None, (
-                f"provider_unknown_fields: skills provider {provider_id}: "
-                f"{', '.join(unknown_provider_fields)}"
-            )
-
-        source_value = provider.get("source")
-        if "source" in provider and (
-            not isinstance(source_value, str) or not source_value.strip()
-        ):
-            return None, None, f"provider_invalid: skills provider {provider_id} source must be non-empty string"
-
-        try:
-            if provider_type == "builtin":
-                provider_instance = BuiltinSkillProvider()
-                provider_instance.provider_id = provider_id
-                provider_instance.rank = rank
-                source = provider_instance.source
-            elif provider_type == "filesystem":
-                roots, field_error = _v2_string_list(provider.get("roots"), "roots", provider_id)
-                if field_error:
-                    return None, None, field_error
-                allowed_bases, field_error = _v2_string_list(
-                    provider.get("allowedBases"), "allowedBases", provider_id
-                )
-                if field_error:
-                    return None, None, field_error
-                assert roots is not None and allowed_bases is not None
-                source = source_value or "filesystem"
-                provider_instance = FilesystemSkillProvider(
-                    provider_id=provider_id,
-                    rank=rank,
-                    roots=_v2_paths(roots),
-                    allowed_bases=_v2_paths(allowed_bases),
-                    source=source,
-                )
-            else:
-                use_default_roots = provider.get("useDefaultRoots", False)
-                if not isinstance(use_default_roots, bool):
-                    return None, None, (
-                        f"provider_invalid: skills provider {provider_id} useDefaultRoots must be boolean"
-                    )
-                roots, field_error = _v2_optional_string_list(provider, "roots", provider_id)
-                if field_error:
-                    return None, None, field_error
-                allowed_bases, field_error = _v2_optional_string_list(
-                    provider, "allowedBases", provider_id
-                )
-                if field_error:
-                    return None, None, field_error
-                if use_default_roots and not allowed_bases:
-                    return None, None, (
-                        f"provider_invalid: skills provider {provider_id} allowedBases must be non-empty "
-                        "when useDefaultRoots is true"
-                    )
-                host_class = (
-                    OpencodeHostSkillProvider
-                    if provider_type == "opencode-host"
-                    else CodexHostSkillProvider
-                )
-                selected_roots = list(host_class.default_roots) if use_default_roots else []
-                explicit_roots = _v2_paths(roots)
-                selected_roots.extend(explicit_roots)
-                # 显式 roots 自身可作为最窄授权边界；默认 roots 仍必须显式给 allowedBases。
-                effective_allowed_bases = _v2_paths(allowed_bases) or explicit_roots
-                provider_instance = host_class(
-                    rank=rank,
-                    roots=selected_roots,
-                    allowed_bases=effective_allowed_bases,
-                )
-                source = source_value or provider_type
-                provider_instance.provider_id = provider_id
-                provider_instance.source = source
-                delegate = getattr(provider_instance, "_delegate", None)
-                if delegate is not None:
-                    delegate.provider_id = provider_id
-                    delegate.source = source
-            if enabled:
-                registry.register(provider_instance)
-        except ValueError as exc:
-            return None, None, f"provider_invalid: skills provider {provider_id}: {exc}"
-
-        providers_meta.append({
-            "id": provider_id,
-            "type": provider_type,
-            "enabled": enabled,
-            "rank": rank,
-            "source": source_value or source,
-            "status": "available" if enabled else "disabled",
-            "warnings": [],
-        })
-        provider_ids.add(provider_id)
-
-    return registry, providers_meta, None
-
-
 def _has_sensitive_part(path: Path) -> bool:
     for part in path.parts:
         # 去掉前导点，避免 .secrets / .accounts.yaml 这类隐藏名绕过。
@@ -364,37 +161,17 @@ def _read_frontmatter(path: Path) -> tuple[dict[str, str] | None, str | None]:
         try:
             if not stat.S_ISREG(os.fstat(fd).st_mode):
                 return None, "SKILL.md is not a regular file"
-            chunks: list[bytes] = []
-            consumed = 0
-            with os.fdopen(fd, "rb") as stream:
+            with os.fdopen(fd, "r", encoding="utf-8") as stream:
                 fd = -1
-                while consumed < MAX_FRONTMATTER_BYTES:
-                    line = stream.readline(MAX_FRONTMATTER_BYTES - consumed)
-                    if not line:
-                        break
-                    chunks.append(line)
-                    consumed += len(line)
-                    if len(chunks) > 1 and line.strip() == b"---":
-                        break
-                else:
-                    return None, "SKILL.md frontmatter exceeds 8192 bytes"
+                lines = stream.read().splitlines()
         finally:
             if fd >= 0:
                 os.close(fd)
-    except OSError as exc:
-        return None, f"failed to read SKILL.md: {exc}"
-
-    try:
-        lines = b"".join(chunks).decode("utf-8").splitlines()
-    except UnicodeError as exc:
+    except (OSError, UnicodeError) as exc:
         return None, f"failed to read SKILL.md: {exc}"
 
     if not lines or lines[0].strip() != "---":
         return None, "SKILL.md must start with YAML frontmatter"
-    if len(chunks) < 2 or chunks[-1].strip() != b"---":
-        if consumed >= MAX_FRONTMATTER_BYTES:
-            return None, "SKILL.md frontmatter exceeds 8192 bytes"
-        return None, "SKILL.md frontmatter is not closed"
     fields: dict[str, str] = {}
     for line in lines[1:]:
         if line.strip() == "---":
@@ -583,86 +360,7 @@ def _error_payload(path: Path, message: str, *, include_status: bool) -> dict[st
     return payload
 
 
-def _v2_error_payload(path: Path, message: str) -> dict[str, Any]:
-    return {
-        "status": "error",
-        "registry": str(path),
-        "version": 2,
-        "runtime": "seamCatalog",
-        "providers": [],
-        "skills": [],
-        "conflicts": [],
-        "complete": False,
-        "warnings": [],
-        "checks": [{"level": "error", "message": message}],
-    }
-
-
-def _registry_version(home: Path) -> tuple[Path, Any, str | None]:
-    path, registry, error = _read_registry_root(home)
-    return path, None if registry is None else registry.get("version"), error
-
-
-def _list_skills_v2(home: Path, path: Path) -> dict[str, Any]:
-    registry, providers_meta, error = load_skill_registry_v2(home)
-    if error:
-        return _v2_error_payload(path, error)
-    assert registry is not None and providers_meta is not None
-    snapshot = registry.snapshot()
-    skills = [
-        {
-            "id": summary.name,
-            "name": summary.name,
-            "description": summary.description,
-            "provider": summary.provider,
-            "source": summary.source,
-            "rank": summary.rank,
-            "backend": summary.backend,
-            "modelInvocable": summary.invocation.model_invocable,
-            "userInvocable": summary.invocation.user_invocable,
-        }
-        for summary in snapshot.skills
-    ]
-    conflicts = [
-        {
-            "name": conflict.name,
-            "winnerProvider": conflict.winner_provider,
-            "shadowed": [list(item) for item in conflict.shadowed],
-        }
-        for conflict in snapshot.conflicts
-    ]
-    checks: list[dict[str, str]] = [{"level": "ok", "message": "skills registry v2 is valid"}]
-    checks.extend(
-        {"level": "warning", "message": warning}
-        for warning in snapshot.warnings
-    )
-    checks.extend(
-        {"level": "warning", "message": f"skills provider disabled: {meta['id']}"}
-        for meta in providers_meta
-        if meta["status"] == "disabled"
-    )
-    return {
-        "status": "ok",
-        "registry": str(path),
-        "version": 2,
-        "runtime": "seamCatalog",
-        "providers": providers_meta,
-        "skills": skills,
-        "conflicts": conflicts,
-        "complete": snapshot.complete,
-        "warnings": list(snapshot.warnings),
-        "checks": checks,
-    }
-
-
 def list_skills(home: Path = DEFAULT_HOME) -> dict[str, Any]:
-    version_path, version, version_error = _registry_version(home)
-    if version_error:
-        return _error_payload(version_path, version_error, include_status=True)
-    if version == 2:
-        return _list_skills_v2(home, version_path)
-
-    # v1 继续走原校验和输出路径，保持既有消费者与逐字段输出兼容。
     path, registry, error = _load_registry(home)
     if error:
         return _error_payload(path, error, include_status=True)
@@ -680,14 +378,6 @@ def list_skills(home: Path = DEFAULT_HOME) -> dict[str, Any]:
 
 
 def doctor_skills(home: Path = DEFAULT_HOME) -> tuple[bool, dict[str, Any]]:
-    version_path, version, version_error = _registry_version(home)
-    if version_error:
-        return False, _error_payload(version_path, version_error, include_status=False)
-    if version == 2:
-        result = _list_skills_v2(home, version_path)
-        return result["status"] == "ok", result
-
-    # v1 继续复用原 doctor payload，不增加 version 等新字段。
     path, registry, error = _load_registry(home)
     if error:
         return False, _error_payload(path, error, include_status=False)
@@ -701,44 +391,3 @@ def doctor_skills(home: Path = DEFAULT_HOME) -> tuple[bool, dict[str, Any]]:
         "skills": skills,
         "checks": checks,
     }
-
-
-def get_skill(name: str, home: Path = DEFAULT_HOME) -> dict[str, Any]:
-    path, version, error = _registry_version(home)
-    if error:
-        return {"status": "error", "message": error}
-    if version != 2:
-        return {"status": "unsupported", "message": "skills get requires registry version 2"}
-    registry, _, error = load_skill_registry_v2(home)
-    if error:
-        return {"status": "error", "registry": str(path), "message": error}
-    assert registry is not None
-    definition = registry.get(name)
-    if definition is None:
-        return {"status": "not_found", "id": name}
-    candidate = definition.candidate
-    return {
-        "status": "ok",
-        "id": candidate.name,
-        "description": candidate.description,
-        "backend": candidate.backend,
-        "content": definition.content,
-        "truncated": definition.truncated,
-        "sizeBytes": definition.size_bytes,
-    }
-
-
-def list_skill_providers(home: Path = DEFAULT_HOME) -> dict[str, Any]:
-    path, version, error = _registry_version(home)
-    if error:
-        return {"status": "error", "message": error}
-    if version != 2:
-        return {
-            "status": "unsupported",
-            "message": "skills providers requires registry version 2",
-        }
-    _, providers_meta, error = load_skill_registry_v2(home)
-    if error:
-        return {"status": "error", "registry": str(path), "message": error}
-    assert providers_meta is not None
-    return {"status": "ok", "version": 2, "providers": providers_meta}

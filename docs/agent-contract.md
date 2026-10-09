@@ -138,5 +138,6 @@ Phase 3（编排运行时）在此之上增加 **Pipeline 编排 + Skill 执行*
 - **Gate 是纯声明**，其检查逻辑必须由已注册 skill（`gate.evaluator`）执行，禁止内嵌 prompt/脚本；
 - agent 不是一级概念，只是 skill 的一种后端。
 
-权威模型见 [`pipeline.md`](pipeline.md)（设计决策 D12）。Phase 3A **已实现、审查通过并发布 v0.8.0**；
-Phase 3B 的**分期与状态以 [`capability-seams.md`](capability-seams.md) §9 为唯一来源**（本文不复制状态）。
+权威模型见 [`pipeline.md`](pipeline.md)（设计决策 D12）。Phase 3A（Pipeline 定义 + 校验 + builtin-only
+runner）**已实现、审查通过并发布 v0.8.0**；Phase 3B-0（capability seam 设计文档 + D13）**已落**，
+3B-1..3B-3 尚未实现（见 [`capability-seams.md`](capability-seams.md) §9）。

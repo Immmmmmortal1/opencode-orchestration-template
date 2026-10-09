@@ -159,7 +159,7 @@ pipeline 只执行 `builtin` 后端 skill，skills/MCP 尚未执行。
 
 - **真正的多 agent 调度引擎**（动态起 N 个 agent、负载均衡、任务队列、运行时决定调度策略）；
 - hooks 的真实业务执行；
-- skills/MCP 的**运行时执行**（**当前已确认的 Phase 3B-0..3B-3** 只做**只读 catalog/config 发现
+- skills/MCP 的**运行时执行**（⚠️ **2026-10-08 方向调整**：skill/MCP 归宿主机制、编排层不关心；
   + pipeline 引用接入**，即只读适配宿主真实来源，**不执行 agent backend、不建立 MCP 网络连接**；
   真实执行仍由宿主负责。3B-5（local MCP）/ 3B-6（agent backend）**尚未排期、需另行确认**，
   见 [`capability-seams.md`](capability-seams.md) §9/§10）；

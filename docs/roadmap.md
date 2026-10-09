@@ -183,7 +183,7 @@ orchagent skills list|doctor
 
 ## Phase 3B：Skill / MCP capability seam（可插拔）
 
-状态：**以 [`capability-seams.md`](capability-seams.md) §9 为唯一来源**（本文不复制状态）。规范定义见该文。
+状态：**3B-0 已落（文档 + D13），实现未开始**。规范定义见 [`capability-seams.md`](capability-seams.md)（唯一来源；本节为摘要，冲突时以该文为准）。
 
 目标：
 
@@ -197,7 +197,7 @@ orchagent skills list|doctor
   （待相关子期确认），本文不作承诺。
 
 分期：**唯一分期定义见 [`capability-seams.md`](capability-seams.md) §9**（3B-0..3B-6；本处不复制表格）。
-用户已确认的立即执行范围为 **3B-0..3B-3**；3B-4..3B-6 需另行确认排期。
+⚠️ **2026-10-08 方向调整**：skill / MCP 归宿主机制，**编排层不关心**；3B-1 已撤销，本分期**暂停待按「agent 编排」重设**。
 
 注意：`backend` 字段**已在 3A 引入并校验**（见 [`pipeline.md`](pipeline.md) §4.0）；3B v2 中后端归属
 `SkillDefinition.execution.backend`，**agent 后端真实执行属 3B-6（未排期，见
