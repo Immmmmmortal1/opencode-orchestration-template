@@ -87,7 +87,7 @@ Phase 3 会把 skill 作为流水线的**最小执行单元**（见 [`pipeline.m
 **字段命名约定**（避免歧义）：`stage.skill` 是 stage 对**已注册 skill id** 的引用；
 `skill.backend` 是 skill 自身的**后端类型**。两者是不同层级概念，不得复用同一字段名。
 
-## Phase 3B：skill 演进为 capability seam（**3B-1 未实现**）
+## Phase 3B：skill 演进为 capability seam（状态见 [`capability-seams.md`](capability-seams.md) §9）
 
 Phase 3B 把 skill 从「显式声明校验器」升级为 **capability seam**
 （Definition / Provider / Consumer），作为**宿主真实 skill 目录的只读适配层**——
@@ -105,3 +105,43 @@ Phase 3B 把 skill 从「显式声明校验器」升级为 **capability seam**
 - **失败隔离**：单 provider 失败只跳过 + warning；`complete=false` 不缓存；pipeline 引用缺失 → fail-closed。
 - **安全**：宿主目录用**显式 allowed roots**；逐段拒 symlink、hardlink fail-closed、敏感名拒绝。
 - **迁移**：v1/v2 双读，**默认模板保持 v1**（旧 home 不破）。
+
+### v2 registry schema（状态见 [`capability-seams.md`](capability-seams.md) §9）
+
+`extensions/skills.yaml` 的 `version: 2` 为**显式选择**（默认模板仍 v1）：
+
+```json
+{
+  "version": 2,
+  "providers": [
+    { "id": "orchagent.skills.builtin", "type": "builtin", "enabled": true, "rank": 50 },
+    { "id": "custom.fs", "type": "filesystem", "enabled": true, "rank": 100,
+      "roots": ["~/my-skills"], "allowedBases": ["~/my-skills"] }
+  ],
+  "overrides": []
+}
+```
+
+- `type` ∈ `builtin` / `filesystem` / `opencode-host` / `codex-host`
+- `filesystem` 必须给 `roots` + `allowedBases`（**显式授权边界**）；
+  `opencode-host` / `codex-host` 的 `useDefaultRoots: true` 也要求非空 `allowedBases`
+- `overrides` 目前**只接受空数组**（语义未实现，非空即 error）
+- 未知字段 / `version` 非整数 2（拒绝 `2.0` / `true`）/ 重复 `id` / `rank` 为 bool → **fail-closed**
+- `enabled: false` 的 provider 不注册，但仍出现在输出中标记 `disabled`
+
+命令：
+
+```bash
+orchagent skills list        # v2 → runtime:seamCatalog，含 skills/conflicts/providers
+orchagent skills doctor
+orchagent skills get <id>    # 按需加载正文（v1 下返回 unsupported，不抛错）
+orchagent skills providers
+```
+
+`skills get` 的 `content` 最多返回 256 KiB，并始终包含 `truncated` 与 `sizeBytes`；
+`sizeBytes` 是文件的真实字节数。catalog 阶段仅读取最多 8 KiB 的 frontmatter，不读取正文；
+frontmatter 超限或未闭合时拒绝该候选并令观测 `complete=false`。
+
+> 命名空间说明：`builtin` provider 的 skill id 为**点号命名**（如
+> `orchagent.pipeline.emit-json`），因此该 provider **声明自己的 `name_pattern`**；
+> 其余 provider 仍强制 kebab-case。`name` 仅作查找键，**绝不当作路径使用**。

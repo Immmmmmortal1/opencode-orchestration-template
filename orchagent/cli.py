@@ -16,7 +16,7 @@ from .opencode import link as opencode_link
 from .opencode import unlink as opencode_unlink
 from .paths import DEFAULT_HOME
 from .pipeline import doctor_pipelines, list_pipelines, run_pipeline
-from .skills import doctor_skills, list_skills
+from .skills import doctor_skills, get_skill, list_skill_providers, list_skills
 
 
 def print_json(data: object) -> None:
@@ -129,6 +129,14 @@ def cmd_skills(args: argparse.Namespace) -> int:
         ok, result = doctor_skills(DEFAULT_HOME)
         print_json(result)
         return 0 if ok else 1
+    if args.skills_cmd == "get":
+        result = get_skill(args.name, DEFAULT_HOME)
+        print_json(result)
+        return 0 if result.get("status") == "ok" else 1
+    if args.skills_cmd == "providers":
+        result = list_skill_providers(DEFAULT_HOME)
+        print_json(result)
+        return 0 if result.get("status") == "ok" else 1
     return 2
 
 
@@ -218,6 +226,9 @@ def build_parser() -> argparse.ArgumentParser:
     skills_sub = p_skills.add_subparsers(dest="skills_cmd", required=True)
     skills_sub.add_parser("list")
     skills_sub.add_parser("doctor")
+    p_skills_get = skills_sub.add_parser("get")
+    p_skills_get.add_argument("name")
+    skills_sub.add_parser("providers")
     p_skills.set_defaults(func=cmd_skills)
 
     p_pipeline = sub.add_parser("pipeline")

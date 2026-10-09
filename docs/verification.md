@@ -404,5 +404,77 @@ python3 -m unittest discover -s tests
 
 验证结果：以当前 `python3 -m unittest discover -s tests` 的实际输出为准，不在文档中写死用例数。
 
-说明：3B-0 **不引入任何行为变更**；`skills`/`mcp` 的 `runtime` 仍为 `notImplemented`，
-seam 实现见后续 3B-1..3B-3。
+说明：3B-0 **不引入任何行为变更**；`skills`/`mcp` 的 `runtime` 仍为 `notImplemented`。
+后续子期的实现状态见 [`capability-seams.md`](capability-seams.md) §9（唯一来源）。
+
+## Phase 3B-1：skill capability seam（只读 catalog）
+
+范围：新增 skill seam 的只读目录发现与按需加载；**不改写/安装宿主 skill**；
+**不接 pipeline**（3B-2）、**不接 MCP**（3B-3）。
+
+交付：
+
+- `orchagent/skill_seam.py`：`SkillRegistry`（Definition）+ `SkillProvider` Protocol +
+  `SkillCandidate` / `SkillProviderObservation` / `SkillSummary` / `SkillDefinition` / `SkillConflict`
+  - 裁决：`rank` 升序 → provider 注册序 → provider 内候选顺序；被遮蔽者输出到 `conflicts`
+  - 渐进披露：`snapshot()` 只出元数据（**无正文**），`get(name)` 才加载正文
+  - 失败隔离：单 provider 异常/非法候选只跳过 + warning；任一 `complete=false` → 快照 `complete=false`
+  - provider 可声明 `name_pattern`（builtin 用点号命名空间；缺省 kebab-case）
+- `orchagent/skill_providers.py`：`BuiltinSkillProvider`（rank 50，来自 3A fixture catalog）、
+  `FilesystemSkillProvider`（显式 roots + allowedBases）、`OpencodeHostSkillProvider` / `CodexHostSkillProvider`
+  （预设封装；`useDefaultRoots` 必须显式 opt-in，默认不扫描宿主目录）
+  - 安全：root 越界拒绝、**逐段**拒 symlink、hardlink（`st_nlink>1`）fail-closed、敏感名拒绝、
+    `O_NOFOLLOW` + regular file 校验、非 UTF-8 结构化跳过
+- `orchagent/skills.py`：新增 **v2 registry loader**（`version: 2`，严格 fail-closed，
+  `overrides` 仅接受空数组）；`list_skills` / `doctor_skills` 按版本分派，
+  **v1 分支逐字节保持原行为**；新增 `get_skill` / `list_skill_providers`
+- `orchagent/cli.py`：新增 `skills get <name>` / `skills providers`
+- `tests/test_skill_seam.py`、`tests/test_skill_providers.py`、`tests/test_skills_v2.py`
+
+运行：
+
+```bash
+python3 -m compileall orchagent tests
+python3 -m unittest discover -s tests
+```
+
+覆盖矩阵：
+
+| 文件 | 覆盖 |
+|---|---|
+| `tests/test_skill_seam.py` | rank/注册序/候选序三级裁决、`conflicts`、失败隔离、非法候选丢弃、`complete` 传播、渐进披露（`get` 才读正文）、陈旧定义拒绝、缓存与 `invalidate`、provider `name_pattern`（含缺省仍拒点号名）、revision 聚合、`SkillSummary` 无正文 |
+| `tests/test_skill_providers.py` | builtin 目录与 `name_pattern`、文件系统顶层发现（目录包 / 扁平 `.md`，**不递归**）、root 越界、中间段 symlink、**root 自身 symlink**、hardlink、敏感名、name 与路径不一致、frontmatter 布尔字段与非法值、非 UTF-8、无 frontmatter、`get_definition` 越界 locator 拒绝、`useDefaultRoots` opt-in 与 `allowedBases` 门禁、codex/opencode host 预设 |
+| `tests/test_skills_v2.py` | v2 schema 严格性（version 非整数 2 / 未知字段 / 重复 id / rank bool / 未知 type / filesystem 缺 allowedBases / host 默认 roots 缺 allowedBases / `overrides` 非空）、`enabled:false` 不注册但可见、v1 兼容回归、`skills get` 命中/未命中/unsupported、`skills providers`、CLI 退出码、`cmd_pipeline` 对 `skills[].id` 兼容 |
+
+验证结果：以当前 `python3 -m unittest discover -s tests` 的实际输出为准，不在文档中写死用例数。
+
+验证要点（本轮实际执行）：
+
+- **v1 逐字节回归**：对同一 v1 registry，用 HEAD 版 `skills.py` 与新版的 `list_skills`/`doctor_skills`
+  输出比对，**完全一致**（含成功路径）。
+- **变异验证**（关键规则均 red-capable）：rank 反向、provider 异常冒泡、忽略 `complete=false`、
+  不丢弃非法候选、忽略 provider `name_pattern`、移除 `_read_safe` 越界检查、放宽 `version` 校验、
+  v1 分派失效 —— 均能使测试转红。
+- **防御纵深（非缺陷）**：hardlink 在 `lstat` 与 `fstat` 双重检查；重复 provider id 在 loader 与
+  `SkillRegistry.register` 双重拦截；root symlink 在 `_authorize_root` 与 `_read_safe` 双重拦截。
+  单层移除不改变可观测行为，故对应变异不转红属预期。
+- **CLI 端到端**：`skills list|get|providers` 在 v2 home 下退出码与输出正确
+  （`get` 命中 `rc=0`、未命中 `rc=1`）。
+
+不在本阶段范围：pipeline 接入（3B-2）、MCP seam（3B-3）、agent backend、I/O 契约、
+snapshot 落盘缓存、`overrides` 语义。
+
+### 3B-1 审查修复记录（3 轮 review）
+
+| 轮 | 结果 | 修复内容 |
+|---|---|---|
+| R1 | revise | ①`allowedBases` 末段 symlink 可绕过；②`complete=false` 仍被缓存；③catalog 整读正文；④`skills get` 正文无上限；⑤文档状态自相矛盾；⑥provider 未产出 revision |
+| R2 | revise | ①allowed base **父级** symlink 仍可绕过（改为逐段检查）；②discovery→get 之间 name 变化未发现（并失效目录）；③v1 catalog 无界整读；④状态在 §9 外仍被复制 |
+| R3 | revise（Standards **pass**） | ①`roadmap.md`/`pipeline.md`/`mcp.md` 残留状态断言 → 全部改指针；②`register()` 缺 **disposer**（规范 §4.2 契约）→ 已实现并加测试；③§7「任一段 symlink」与平台豁免不一致 → 规范补写豁免边界与信任前提 |
+
+主 Agent 独立验证（每轮）：全量测试全绿；**v1 输出逐字节回归**；关键规则**变异验证**（rank/隔离/缓存/上限/name 重校验/disposer/豁免 均 red-capable）；
+另修正 2 处实现者未发现的**测试自我掩盖**（用实现常量生成测试数据）。
+
+平台豁免说明（§7）：macOS 上 `/var` `/tmp` `/etc` 为系统别名（指向 `/private/*`），
+精确匹配时放行；其下任一段 symlink 仍拒绝。真实文件直测：正常临时 root 可发现；
+「父级为攻击者可控 symlink」的 root 被拒（`complete=False`）。

@@ -183,7 +183,7 @@ orchagent skills list|doctor
 
 ## Phase 3B：Skill / MCP capability seam（可插拔）
 
-状态：**3B-0 已落（文档 + D13），实现未开始**。规范定义见 [`capability-seams.md`](capability-seams.md)（唯一来源；本节为摘要，冲突时以该文为准）。
+状态：**以 [`capability-seams.md`](capability-seams.md) §9 为唯一来源**（本文不复制状态）。规范定义见该文。
 
 目标：
 

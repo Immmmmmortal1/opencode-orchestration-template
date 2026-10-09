@@ -53,7 +53,9 @@ orchagent mcp doctor
 - 只校验字符串/类型形态，**不校验 URL 可达性**。
 - 输出中**不回显** `env` / `headers` 的值，避免泄露凭据。
 
-## Phase 3B：MCP 演进为 capability seam（**3B-3 未实现**）
+## Phase 3B：MCP 演进为 capability seam
+
+> 子期与实现状态见 [`capability-seams.md`](capability-seams.md) §9（唯一来源，本文不复制状态）。
 
 Phase 3B 把 MCP 从「registry 声明校验」升级为 **capability seam**
 （Definition / Provider / Consumer），作为宿主 MCP 配置的**只读适配层**。

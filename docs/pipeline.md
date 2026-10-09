@@ -10,8 +10,8 @@ pipeline 编排模型内的**文档间**表述冲突，以本文为准。
 对应设计决策：[`design-decisions.md`](design-decisions.md) 的 **D12**。
 
 > 本文既含**设计**也含**已实现**部分。**Phase 3A（第 10.2 节范围）已实现、审查通过并发布 v0.8.0**；
-> 3A 之后的 3B/3C 部分仍为设计（3B-0 设计文档已落，实现未开始，见
-> [`capability-seams.md`](capability-seams.md)）。3A/3B/3C 的拆分见第 10 节。
+> 3A 之后的 3B/3C 部分仍为设计；**子期与实现状态见 [`capability-seams.md`](capability-seams.md) §9
+> （唯一来源，本文不复制状态）**。3A/3B/3C 的拆分见第 10 节。
 
 ## 1. 为什么需要这个模型
 
@@ -375,7 +375,8 @@ runner 在 stage/gate 边界续约失败属于失权事件，不再进入回退�
 只执行 `backend=builtin` 且已注册的 skill；**不启动 agent、不启动 MCP、不做真实业务**；
 不做完整 I/O schema 接线；无后台 daemon、无动态调度。
 
-**3A 明确不做**：agent 后端（3B-6，未排期）、完整 I/O schema 与接线（3B-4，未实现）（子期见 [`capability-seams.md`](capability-seams.md) §9.1）、
+**3A 明确不做**：agent 后端与完整 I/O schema 接线（对应子期见
+[`capability-seams.md`](capability-seams.md) §9.1；状态以 §9 为准）、
 路由选择（3C）、真实流水线（3C）。
 
 ### 10.2 3A 引入的契约变更（升级影响）
