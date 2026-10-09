@@ -39,6 +39,7 @@
 | v0.8.0 | Phase 3A：pipeline registry 校验 + builtin-only runner |
 | v0.8.1 | 项目记忆补充 Phase 3A |
 | v0.8.2 | Phase 3B-0：capability seam 设计文档 + D13（纯文档）|
+| v0.9.0 | Phase 3B-1：skill capability seam 只读 catalog（skill_seam/skill_providers/v2 registry/CLI get+providers）|
 
 - Phase 1 安装闭环：`install` / `rollback` / `doctor` / `config validate` / `extensions list` / `opencode link|unlink|rollback`
 - Phase 2A：`hooks list` / `hooks doctor` / `hooks run <event> --dry-run`（未带 `--dry-run` 必须失败）
@@ -55,6 +56,19 @@
   - 终止决策表、产出失效、attempt 额度、稳定键（stage_key/gate_key）均按 `docs/pipeline.md` §5 落实
 - 未实现：skills/MCP runtime、knowledge 索引、Phase 3C（路由 + 真实流水线）
 - Phase 3B 的分期与状态**以 [`docs/capability-seams.md`](docs/capability-seams.md) §9 为唯一来源**（此处不重复断言）
+- Phase 3B-1（v0.9.0，**已实现**）：skill capability seam 只读 catalog
+  - `orchagent/skill_seam.py`：`SkillRegistry` + `SkillProvider` 协议；裁决（rank→注册序→候选序）、
+    渐进披露（`snapshot` 无正文 / `get` 才读）、失败隔离（异常/非法候选只跳过；`complete=False` 不缓存）、
+    **`register()` 返回幂等 disposer**（对象同一性）；provider 可声明 `name_pattern`
+  - `orchagent/skill_providers.py`：`builtin`（点号命名空间）/ `filesystem`（显式 roots+allowedBases）/
+    `opencode-host` / `codex-host`（默认 roots 需显式 opt-in）；安全：allowed-roots、**逐段** symlink
+    （含 base 父级；仅 macOS `/var` `/tmp` `/etc` 系统别名豁免）、hardlink、敏感名、有界读取
+    （frontmatter ≤8KiB、正文 ≤256KiB 且返回 `truncated`/`sizeBytes`）
+  - `orchagent/skills.py`：**v2 registry loader**（严格 fail-closed；`overrides` 仅空数组）+
+    `get_skill` / `list_skill_providers`；**v1 行为逐字节不变**
+  - `orchagent/cli.py`：`skills get <name>` / `skills providers`
+  - 测试 193→269；**5 轮独立审查**（R5 双轴 pass），变异验证覆盖关键规则
+  - 未做：pipeline 接入（3B-2）、MCP（3B-3）、快照落盘缓存、`overrides` 语义
 - Phase 3B-0（**仅文档**）：`docs/capability-seams.md`（参考 DeepSeek Harness 的 **capability seam**
   （Definition/Provider/Consumer）+ 本机 opencode/codex 宿主机制实证 + orchAgent 映射）+ 设计决策 **D13**
   - 定位：orchAgent 是宿主真实 skill 目录 / MCP 配置的**只读适配层**，**不自建第二套 registry**
