@@ -12,6 +12,7 @@
 
 - hooks：Phase 2A 已支持 `dryRunOnly`。
 - knowledge：Phase 2B 已支持 `searchOnly`。
-- pipeline：Phase 3A 已支持 `builtinOnly`（只执行 `builtin` 后端 skill）。
+- pipeline：Phase 3A 已支持 `builtinOnly`（**v1**，只执行 `builtin` 后端 skill）；v2 registry 为
+  `dispatchOnly`（只输出 role 派发指令、不执行，见 [`pipeline.md`](pipeline.md) §2.4）。
 - skills / mcp：仍为 `notImplemented`（Phase 3B 将演进为 capability seam，见
   [`capability-seams.md`](capability-seams.md)）。

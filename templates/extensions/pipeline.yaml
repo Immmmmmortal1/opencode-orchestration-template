@@ -1,1 +1,121 @@
-{"version":1,"pipelines":[]}
+{
+  "version": 2,
+  "roles": [
+    {
+      "id": "investigator",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "description": "定位根因并建立可复现证据"
+    },
+    {
+      "id": "fixer",
+      "provider": "glm",
+      "model": "glm-5.2",
+      "description": "按确认方案实施最小修复"
+    },
+    {
+      "id": "verifier",
+      "provider": "openai",
+      "model": "gpt-5.5",
+      "description": "验证回归测试与原始复现"
+    }
+  ],
+  "pipelines": [
+    {
+      "id": "bugfix",
+      "revision": "1",
+      "enabled": true,
+      "entryStage": "investigate",
+      "stages": [
+        {
+          "id": "investigate",
+          "role": "investigator",
+          "maxAttempts": 2,
+          "params": {},
+          "gates": ["gate-investigate-evidence"]
+        },
+        {
+          "id": "repro",
+          "role": "investigator",
+          "maxAttempts": 3,
+          "params": {},
+          "gates": ["gate-repro-red-capable"]
+        },
+        {
+          "id": "fix",
+          "role": "fixer",
+          "maxAttempts": 3,
+          "params": {},
+          "gates": ["gate-fix-implementation"]
+        },
+        {
+          "id": "verify",
+          "role": "verifier",
+          "maxAttempts": 3,
+          "params": {},
+          "gates": ["gate-verify-regression"]
+        }
+      ],
+      "gates": [
+        {
+          "id": "gate-investigate-evidence",
+          "stage": "investigate",
+          "evaluator": "gate-investigate-evidence",
+          "params": {}
+        },
+        {
+          "id": "gate-repro-red-capable",
+          "stage": "repro",
+          "evaluator": "gate-repro-red-capable",
+          "params": {}
+        },
+        {
+          "id": "gate-fix-implementation",
+          "stage": "fix",
+          "evaluator": "gate-fix-implementation",
+          "params": {}
+        },
+        {
+          "id": "gate-verify-regression",
+          "stage": "verify",
+          "evaluator": "gate-verify-regression",
+          "params": {}
+        }
+      ],
+      "edges": [
+        {
+          "from": {"stage": "investigate", "gate": "gate-investigate-evidence", "verdict": "pass"},
+          "to": {"stage": "repro"}
+        },
+        {
+          "from": {"stage": "investigate", "gate": "gate-investigate-evidence", "verdict": "fail"},
+          "to": {"stage": null}
+        },
+        {
+          "from": {"stage": "repro", "gate": "gate-repro-red-capable", "verdict": "pass"},
+          "to": {"stage": "fix"}
+        },
+        {
+          "from": {"stage": "repro", "gate": "gate-repro-red-capable", "verdict": "fail"},
+          "to": {"stage": null}
+        },
+        {
+          "from": {"stage": "fix", "gate": "gate-fix-implementation", "verdict": "pass"},
+          "to": {"stage": "verify"}
+        },
+        {
+          "from": {"stage": "fix", "gate": "gate-fix-implementation", "verdict": "fail"},
+          "to": {"stage": "fix"}
+        },
+        {
+          "from": {"stage": "verify", "gate": "gate-verify-regression", "verdict": "pass"},
+          "to": {"terminal": "succeeded"}
+        },
+        {
+          "from": {"stage": "verify", "gate": "gate-verify-regression", "verdict": "fail"},
+          "to": {"stage": "repro"}
+        }
+      ]
+    }
+  ]
+}

@@ -73,8 +73,10 @@ frontmatter 采用**受限语法**（不引入 YAML 依赖，只支持 `key: val
 
 ## Phase 3 扩展：Skill 的 I/O 契约
 
-Phase 3 会把 skill 作为流水线的**最小执行单元**（见 [`pipeline.md`](pipeline.md) 与 D12），
+Phase 3 的 **v1** 会把 skill 作为流水线的**最小执行单元**（见 [`pipeline.md`](pipeline.md) 与 D12），
 因此 skill 条目需要声明 I/O，才能把「上一阶段输出 → 下一阶段输入」接线。
+⚠️ **v2 不再引用 skill**：v2 的 stage 引用 **role**，orchAgent 不执行 skill（skill / MCP 归宿主，
+见 [`pipeline.md`](pipeline.md) §2.4 与 D14）。本节余下内容属 **v1**。
 
 **当前（3A 已实现）**：`backend` 必填、合法值**仅 `builtin`**；`skills list|doctor` 校验
 **skill registry**（`id` / `adapter` / `path` / `backend` / 目录存在性 / `SKILL.md` frontmatter /
@@ -84,8 +86,9 @@ Phase 3 会把 skill 作为流水线的**最小执行单元**（见 [`pipeline.m
 > **「字段 → 子期」映射的唯一定义在 [`capability-seams.md`](capability-seams.md) §9.1**
 > （`input`/`output`、`prompt`、`backend: agent` 的引入子期见该节）；本节不复制该映射。
 
-**字段命名约定**（避免歧义）：`stage.skill` 是 stage 对**已注册 skill id** 的引用；
-`skill.backend` 是 skill 自身的**后端类型**。两者是不同层级概念，不得复用同一字段名。
+**字段命名约定**（避免歧义）：`stage.skill` 是 **v1** stage 对**已注册 skill id** 的引用；
+`stage.role` 是 **v2** stage 对**已声明 role id** 的引用；`skill.backend` 是 skill 自身的**后端类型**。
+以上是不同层级概念，不得复用同一字段名。
 
 ## Phase 3B：skill 演进为 capability seam（**3B-1 未实现**）
 

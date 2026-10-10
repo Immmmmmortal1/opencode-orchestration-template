@@ -174,12 +174,23 @@ orchagent skills list|doctor
 
 - Pipeline = 阶段 + 门禁 + 回退边 的定义与校验；
 - 阶段状态推进落 `session`（D11），并发由 lock/lease 保护；
-- `stage.skill` 引用 **`builtin` 后端的已注册 skill**；
+- `stage.skill` 引用 **`builtin` 后端的已注册 skill**（**v1** 形态）；
 - **回退边语义**（产出失效与重算、`maxAttempts`、终止决策表、lock/lease 释放边界，见 [`pipeline.md`](pipeline.md) §5）。
 
 关键约束：**「stage 必须引用已注册 skill」从 3A 第一天就生效**——3A **不是**"暂时允许非 skill 执行"。
+（⚠️ 该约束是 **v1** 的；**v2 改用 `stage.role`**，见下。）
 
 验收：证明「带门禁和回退边的状态机」端到端可行；**不引入通用引擎**。
+
+### Phase 3 v2：role 派发模型（2026-10-08 方向调整）
+
+状态：**已实现**（role registry + `stage.role` + `pipeline run`(dispatch) / `pipeline advance` +
+`opencode sync-agents`）。规范定义见 [`pipeline.md`](pipeline.md) §2.4 与 [D14](design-decisions.md)。
+
+- 编排单元由 **skill 改为 role**（provider/model 名字，不含凭证）；orchAgent **不调 LLM、不碰 key**，
+  真正调用交宿主；
+- registry 由 `version` 区分（严格整数 `1|2`），不混用；runtime 标签 v1=`builtinOnly` / v2=`dispatchOnly`；
+- 第一条真实流水线 `bugfix`（investigate→repro→fix→verify，含门禁与回退边）已端到端跑通。
 
 ## Phase 3B：Skill / MCP capability seam（可插拔）
 
@@ -193,7 +204,8 @@ orchagent skills list|doctor
   失败隔离（`complete=false` 不缓存、无 snapshot 引用缺失 → fail-closed）；
 - seam 命令（`skills list|doctor` / `mcp list|doctor` / `skills get`）负责 **catalog / config 校验**；
   `pipeline doctor`（3B-2）负责 `stage.skill` / `gate.evaluator` 对 skill 的**引用完整性**校验
-  （引用不存在或非 `builtin` → fail-closed）。**pipeline 对 MCP resource 的引用契约尚未定义**
+  （引用不存在或非 `builtin` → fail-closed）。⚠️ 该职责属 **v1**；v2 校验的是 `stage.role`
+  对 `roles[]` 的引用完整性（**已实现**，见 `pipeline.md` §2.4）。**pipeline 对 MCP resource 的引用契约尚未定义**
   （待相关子期确认），本文不作承诺。
 
 分期：**唯一分期定义见 [`capability-seams.md`](capability-seams.md) §9**（3B-0..3B-6；本处不复制表格）。

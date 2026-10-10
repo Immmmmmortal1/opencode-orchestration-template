@@ -40,8 +40,13 @@ def list_extensions(home: Path = DEFAULT_HOME) -> list[dict[str, Any]]:
         runtime = {
             "hooks": "dryRunOnly",
             "knowledge": "searchOnly",
-            "pipeline": "builtinOnly",
         }.get(kind, "notImplemented")
+        if kind == "pipeline":
+            version = data.get("version")
+            if isinstance(version, bool) or not isinstance(version, int):
+                runtime = "unknown"
+            else:
+                runtime = {1: "builtinOnly", 2: "dispatchOnly"}.get(version, "unknown")
         rows.append({
             "type": kind,
             "status": "declared",

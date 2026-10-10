@@ -60,7 +60,11 @@ def validate_main_config(config: dict[str, Any]) -> list[str]:
 def validate_extension_registry(path: Path) -> list[str]:
     errors: list[str] = []
     data = read_text_config(path)
-    if data.get("version") != 1:
+    version = data.get("version")
+    if path.stem == "pipeline":
+        if isinstance(version, bool) or not isinstance(version, int) or version not in {1, 2}:
+            errors.append(f"{path}: version must be 1 or 2")
+    elif isinstance(version, bool) or not isinstance(version, int) or version != 1:
         errors.append(f"{path}: version must be 1")
     required_key = "pipelines" if path.stem == "pipeline" else "adapters"
     if required_key not in data:

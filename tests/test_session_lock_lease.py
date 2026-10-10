@@ -23,6 +23,7 @@ from orchagent.session import (
     recover_expired_lease,
     release_lock,
     renew_lease,
+    release_lease,
     save_session,
     session_dir,
     session_path,
@@ -537,6 +538,33 @@ time.sleep(60)
         self.assertIsNone(finalized["session"]["leaseToken"])
         self.assertFalse(lease_path(self.env.home, active["session"]["id"]).exists())
         self.assertEqual(finalized["session"], load_session(self.env.home, active["session"]["id"])["session"])
+
+    def test_release_lease_is_idempotent_and_partial_state_is_repaired(self) -> None:
+        created = self.create()
+        session_id = created["session"]["id"]
+        acquired = self.acquire(session_id, ttl_ms=10_000)
+        session_file = session_path(self.env.home, session_id)
+        partial = json.loads(session_file.read_text(encoding="utf-8"))
+        partial["leaseToken"] = None
+        session_file.write_text(json.dumps(partial), encoding="utf-8")
+
+        released = release_lease(
+            self.env.home,
+            session_id,
+            lease_token=acquired["lease"]["token"],
+            lease_epoch=acquired["lease"]["epoch"],
+        )
+
+        self.assertEqual("ok", released["status"])
+        self.assertFalse(lease_path(self.env.home, session_id).exists())
+        reacquired = acquire_lease(self.env.home, session_id, now_ns=3_000_000_000, ttl_ms=10_000)
+        self.assertEqual("ok", reacquired["status"])
+        self.assertEqual("ok", release_lease(
+            self.env.home,
+            session_id,
+            lease_token=reacquired["lease"]["token"],
+            lease_epoch=reacquired["lease"]["epoch"],
+        )["status"])
 
     def test_finalize_session_recovers_residual_lease_after_unlink_failure(self) -> None:
         created = self.create()

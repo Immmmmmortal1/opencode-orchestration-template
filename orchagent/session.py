@@ -746,6 +746,52 @@ def acquire_lease(
     return _take_lease(home, session_id, now_ns=now_ns, ttl_ms=ttl_ms, require_expired=False)
 
 
+def release_lease(
+    home: Path = DEFAULT_HOME,
+    session_id: str = "",
+    *,
+    lease_token: str | None = None,
+    lease_epoch: int | None = None,
+) -> dict:
+    """幂等释放 lease，并修复 token 已清但 lease 文件残留的部分状态。"""
+    if not _valid_session_id(session_id):
+        return _result_error("invalid_session_id", "session id is invalid")
+    resource = _session_lock_resource(session_id)
+    with _held_session_lock(home, resource) as held:
+        if held["acquire"].get("status") != "ok":
+            result = held["acquire"]
+        else:
+            loaded = load_session(home, session_id)
+            if loaded.get("status") != "ok":
+                result = loaded
+            else:
+                current = loaded["session"]
+                path = lease_path(home, session_id)
+                lease, lease_error = _load_lease(home, session_id) if path.exists() else (None, None)
+                if lease_error:
+                    result = lease_error
+                elif current.get("leaseToken") is None and lease is None:
+                    result = {"status": "ok", "session": current, "released": False}
+                elif current.get("leaseToken") not in {None, lease_token} or current.get("leaseEpoch") != lease_epoch:
+                    result = _result_error("stale_lease_holder", "lease token or epoch does not match current holder")
+                elif lease is not None and (lease.get("token") != lease_token or lease.get("epoch") != lease_epoch):
+                    result = _result_error("stale_lease_holder", "lease token or epoch does not match current holder")
+                else:
+                    updated = dict(current)
+                    updated["leaseToken"] = None
+                    try:
+                        if current.get("leaseToken") is not None:
+                            _atomic_write_json(session_path(home, session_id), updated)
+                        if path.exists():
+                            path.unlink()
+                            _fsync_directory(path.parent)
+                    except OSError as exc:
+                        result = _result_error("lease_release_failed", f"failed to release lease: {exc}")
+                    else:
+                        result = {"status": "ok", "session": updated, "released": True}
+    return _lock_release_result(held, result)
+
+
 def recover_expired_lease(
     home: Path = DEFAULT_HOME,
     session_id: str = "",

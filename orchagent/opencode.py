@@ -8,6 +8,7 @@ from typing import Any
 
 from .backup import create_backup_dir
 from .paths import DEFAULT_HOME
+from .pipeline import load_pipeline_registry, _validate_registry
 
 
 MANAGED_KEY = "orchAgent"
@@ -232,6 +233,127 @@ def unlink(home: Path = DEFAULT_HOME) -> dict[str, Any]:
             notes.pop("instructions", None)
             touched = True
         if touched:
+            write_json(path, data)
+            changed.append(str(path))
+    return {"changed": changed}
+
+
+def _agent_permission() -> dict[str, str]:
+    """返回与现有 orchAgent 入口一致的最小权限。"""
+    return {"read": "allow", "bash": "deny", "task": "deny"}
+
+
+def _pipeline_prompt(pipeline: dict[str, Any], roles: dict[str, dict[str, Any]]) -> str:
+    """根据 v2 管线生成可直接交给 opencode 的编排说明。"""
+    pipeline_id = pipeline["id"]
+    lines = [f"你正在执行 orchAgent v2 管线 {pipeline_id}。", "", "阶段序列："]
+    for index, stage in enumerate(pipeline["stages"], 1):
+        role = roles[stage["role"]]
+        model = role.get("model") or "(默认模型)"
+        lines.append(
+            f"{index}. {stage['id']} → role={stage['role']} → "
+            f"{role['provider']}/{model}；门禁：{', '.join(stage['gates'])}"
+        )
+    lines.extend(["", "门禁与回退边："])
+    for edge in pipeline["edges"]:
+        source = edge["from"]
+        target = edge["to"]
+        destination = target.get("stage") or target.get("terminal") or "失败"
+        lines.append(
+            f"- {source['stage']} / {source['gate']} / verdict={source['verdict']} "
+            f"→ {destination}"
+        )
+    lines.extend(
+        [
+            "",
+            f'开始：pipeline run --pipeline {pipeline_id} --new-session-summary "<任务>"',
+            "记住命令返回的 session id，并始终把它记在对话里。",
+            "每完成一个 stage 后调：pipeline advance --session-id <id> --verdict pass|fail",
+            "根据门禁结果沿对应边继续；不要跳过门禁或自行改变回退目标。",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def sync_agents(home: Path = DEFAULT_HOME) -> dict[str, Any]:
+    """把启用的 v2 管线同步为受 marker 保护的 opencode agents。"""
+    registry, error = load_pipeline_registry(home)
+    if error:
+        return {"status": "error", "error": "invalid_registry", "message": error["message"]}
+    assert registry is not None
+    if registry.get("version") == 1:
+        return {"status": "error", "error": "unsupported", "message": "pipeline registry version 1 does not define agent roles"}
+    validation_error = _validate_registry(registry)
+    if validation_error:
+        return {"status": "error", "error": "invalid_registry", "message": validation_error["message"]}
+
+    roles = {role["id"]: role for role in registry["roles"]}
+    desired: dict[str, dict[str, Any]] = {}
+    for pipeline in registry["pipelines"]:
+        if not pipeline["enabled"]:
+            continue
+        description = f"orchAgent 管线：{pipeline['id']}"
+        if isinstance(pipeline.get("description"), str) and pipeline["description"].strip():
+            description += f" {pipeline['description']}"
+        desired[f"orchagent-{pipeline['id']}"] = {
+            "mode": "primary",
+            "description": description,
+            "prompt": _pipeline_prompt(pipeline, roles),
+            "marker": MANAGED_MARKER,
+            "permission": _agent_permission(),
+        }
+
+    target = primary_config_path()
+    data = read_json(target)
+    agents = data.get("agent", {})
+    if not isinstance(agents, dict):
+        return {"status": "error", "error": "invalid_config", "message": "opencode config field 'agent' is not an object"}
+    for agent_id in desired:
+        existing = agents.get(agent_id)
+        if existing is not None and (not isinstance(existing, dict) or existing.get("marker") != MANAGED_MARKER):
+            return {"status": "error", "error": "unmanaged_conflict", "message": f"opencode agent.{agent_id} exists without orchAgent-managed marker"}
+
+    removed = [
+        agent_id for agent_id, value in agents.items()
+        if str(agent_id).startswith("orchagent-")
+        and isinstance(value, dict)
+        and value.get("marker") == MANAGED_MARKER
+        and agent_id not in desired
+    ]
+    changed = [agent_id for agent_id, value in desired.items() if agents.get(agent_id) != value]
+    changed.extend(removed)
+    if not changed:
+        return {"status": "ok", "target": str(target), "changed": [], "backupDir": None}
+    backup_dir = backup_files([target], home=home)
+    for agent_id in removed:
+        agents.pop(agent_id, None)
+    agents.update(desired)
+    data["agent"] = agents
+    write_json(target, data)
+    return {"status": "ok", "target": str(target), "changed": changed, "backupDir": str(backup_dir)}
+
+
+def unlink_agents(home: Path = DEFAULT_HOME) -> dict[str, Any]:
+    """删除所有带 orchAgent-managed marker 的管线 agents。"""
+    planned: list[tuple[Path, dict[str, Any]]] = []
+    for path in existing_config_paths():
+        data = read_json(path)
+        agents = data.get("agent")
+        if isinstance(agents, dict) and any(
+            isinstance(value, dict) and value.get("marker") == MANAGED_MARKER
+            and str(agent_id).startswith("orchagent-")
+            for agent_id, value in agents.items()
+        ):
+            planned.append((path, data))
+    if planned:
+        backup_files([path for path, _ in planned], home=home)
+    changed: list[str] = []
+    for path, data in planned:
+        agents = data["agent"]
+        removed = [agent_id for agent_id, value in agents.items() if str(agent_id).startswith("orchagent-") and isinstance(value, dict) and value.get("marker") == MANAGED_MARKER]
+        for agent_id in removed:
+            agents.pop(agent_id, None)
+        if removed:
             write_json(path, data)
             changed.append(str(path))
     return {"changed": changed}

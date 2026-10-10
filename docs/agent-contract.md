@@ -47,7 +47,7 @@ agent 必须通过入口配置找到五类 registry：
 ```text
 hooks: dryRunOnly
 knowledge: searchOnly
-pipeline: builtinOnly
+pipeline: builtinOnly（v1）/ dispatchOnly（v2）
 skills/mcp: notImplemented
 ```
 
@@ -131,13 +131,14 @@ orchagent skills doctor
 
 真实执行能力必须晚于 dry-run / 只读校验，并且要有独立验证命令。
 
-Phase 3（编排运行时）在此之上增加 **Pipeline 编排 + Skill 执行**两层模型：
+Phase 3（编排运行时）在此之上增加 **Pipeline 编排**，并有**两代执行者模型**：
 
 - **Pipeline** = 阶段 + 门禁 + 回退边，只负责编排；
-- **`stage.skill` 只能指向已注册 skill**，引用不存在的 skill 必须 **fail-closed**（`builtin` 是 skill 的后端类型，不是绕过 skill 的通道）；
-- **Gate 是纯声明**，其检查逻辑必须由已注册 skill（`gate.evaluator`）执行，禁止内嵌 prompt/脚本；
-- agent 不是一级概念，只是 skill 的一种后端。
+- **v1（skill 执行，3A）**：**`stage.skill` 只能指向已注册 skill**，引用不存在的 skill 必须 **fail-closed**（`builtin` 是 skill 的后端类型，不是绕过 skill 的通道）；**Gate 是纯声明**，其检查逻辑必须由已注册 skill（`gate.evaluator`）执行，禁止内嵌 prompt/脚本；
+- **v2（role 派发，2026-10-08 方向调整）**：**`stage.role` 指向已声明的 role**（role = provider/model 名字，**不含凭证**）；orchAgent **不调 LLM、不执行、不碰 key**，只输出派发指令，真正调用交给**宿主**；`pipeline run`(dispatch) / `pipeline advance` 构成循环。**v1 的 skill 不再是前进方向**（skill / MCP 归宿主）。
+- **v1/v2 由 registry `version` 区分**（严格整数 `1|2`），不混用；v2 出现 `skill` 字段或 v1 出现 `roles` → fail-closed。
 
-权威模型见 [`pipeline.md`](pipeline.md)（设计决策 D12）。Phase 3A（Pipeline 定义 + 校验 + builtin-only
-runner）**已实现、审查通过并发布 v0.8.0**；Phase 3B-0（capability seam 设计文档 + D13）**已落**，
+权威模型见 [`pipeline.md`](pipeline.md)（设计决策 D12 + D14）。Phase 3A（v1：Pipeline 定义 + 校验 + builtin-only
+runner）**已实现、审查通过并发布 v0.8.0**；**v2（role registry + dispatch/advance + opencode agent 生成）已实现**；
+Phase 3B-0（capability seam 设计文档 + D13）**已落但因方向调整暂停**，
 3B-1..3B-3 尚未实现（见 [`capability-seams.md`](capability-seams.md) §9）。

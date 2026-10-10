@@ -51,7 +51,7 @@ Core 只负责：
 
 - hooks：`dryRunOnly`
 - knowledge：`searchOnly`
-- pipeline：`builtinOnly`（只执行 `builtin` 后端 skill）
+- pipeline：按 registry 版本区分（v1=`builtinOnly`，只执行 `builtin` 后端 skill；v2=`dispatchOnly`，只输出 role 派发指令、不执行；registry 不可载入=`unknown`）
 - skills / MCP：`notImplemented`
 
 禁止把声明状态叫做：
@@ -177,6 +177,10 @@ rollback 要求：
 
 用户已确认（2026-09-30）。Phase 3 的核心模型。
 
+> ⚠️ **2026-10-08 部分被 **D14** 取代**：编排单元由 skill
+> 改为 **role**、执行交宿主。**本决策作为 v1（skill 执行）仍然有效**，但**不再是前进方向**；
+> 新流水线用 v2（D14）。两代由 registry `version` 区分，不混用。
+
 原因：固定角色编排（`A→B→C`）表达不了真实流水线——审查会在多个位置重复出现（各审不同对象）、
 门禁不通过需要回退边、不同任务类型编排不同。若每阶段由 agent 自由发挥，审查会被消耗在检查
 **过程**上且标准不稳定。
@@ -256,3 +260,45 @@ registry 会制造第二真相源。
 - remote MCP **网络连接**；
 - 通用 plugin 框架 / 动态加载器；
 - 隐式扫描未声明的宿主目录。
+
+## D14. Pipeline v2：编排单元改为 role，执行交给宿主
+
+用户已确认（2026-10-08）。Phase 3 编排模型的**方向调整**。
+
+原因：D12 的 v1 模型把 pipeline 阶段绑到 skill 执行层，与本轮方向调整（**skill / MCP 归宿主机制、
+编排层不关心**，见 D13）冲突。编排真正需要表达的是「**这一步该派哪个角色、用哪个 provider**」，
+而 LLM 的实际调用由宿主（opencode / codex）按 agent 的 `model` 配置执行。
+若 orchAgent 继续持有 skill 执行，就又制造了与宿主重复的第二套机制。
+
+**本文记录决策与边界；规范定义以 [`pipeline.md`](pipeline.md) §2.4 / §10 为唯一来源**，冲突时以该文为准。
+代码与文档冲突时，一律遵循 [D9](design-decisions.md)。
+
+决策：
+
+- **pipeline registry 支持 v2**（顶层仅 `version` / `roles` / `pipelines`）。v2 的 `Stage` 用
+  **`stage.role`**（引用本 registry `roles[]` 中已声明的 role id）替代 v1 的 `stage.skill`；
+  v2 registry 中出现 `skill` 字段 → **fail-closed**，反之 v1 registry 中出现 `roles` → fail-closed。
+- **role 只声明 provider 与 model 的「名字」**（`id` / `provider` / `model` / `description`），
+  **绝不存储任何凭证**：`api_key` / `key` / `token` / `secret` / `env` 等字段一律拒收。
+- **orchAgent 不调用 LLM、不碰 API key**。真正调用由**宿主**按 agent 的 `model` 配置执行；
+  「派哪个角色干活」由调用方（主 agent）决定。role → provider 的绑定**可换**，pipeline 定义一个字不改。
+- **v2 的 `pipeline run` = dispatch 模式**：建/载 session → 取 `entryStage` 的 role →
+  **输出下一步派发指令后停止**（不执行任何 skill、不推进 stage），并释放 lease。
+- **`pipeline advance` 负责回填推进**：接收 `--verdict pass|fail`，读当前 run 的 `currentStep` 与门禁，
+  复用 D12 的终止决策表与回退边语义，推进到下一 stage（输出新的派发指令）、回退，或落终态。
+  取「当前 run」用 run 上**单调 `sequence`**，不依赖 JSON `sort_keys` 的字典顺序。
+- **删除/替换 v1 权威**：v1 语义**保留可用**（skill-based，`builtinOnly`），但**不是前进方向**；
+  文档以 v2 为准、v1 标注为 legacy。
+- **runtime 标签按版本**：pipeline v1 → `builtinOnly`；v2 → `dispatchOnly`；不可载入 → `unknown`（见 D4）。
+- **opencode 集成**：新增 `opencode sync-agents`（按 v2 pipeline 生成/更新托管 agent 定义，
+  `agent.orchagent-<pipeline-id>`，带 `orchAgent-managed` marker）与 `opencode unlink --agents`
+  （只删带 marker 者）。未托管同名 agent → **拒绝覆盖**（fail-closed）。
+- **pipeline registry 版本约束放宽为严格整数 `1|2`**；其余四类 extension（hooks / skills / mcp / knowledge）
+  **仍严格要求 `1`**。
+
+明确边界：
+
+- v2 **不引入**动态调度（起 N agent / 负载均衡 / 任务队列）：role 派发仍是**静态编排**，与 D12 非目标一致。
+- advance 当前**只支持单 gate stage**；多 gate → `unsupported_multi_gate`（fail-closed，不猜测）。
+- 生成到宿主配置的内容**不含任何 key/token/secret**；写入前走既有备份机制（D7/D8）。
+- `opencode sync-agents` / `unlink --agents` **不碰宿主真实 skill / MCP 目录**，只管理 orchAgent 自己生成的 agent 条目。

@@ -14,8 +14,10 @@ from .mcp import doctor_mcp, list_mcp
 from .opencode import doctor as opencode_doctor
 from .opencode import link as opencode_link
 from .opencode import unlink as opencode_unlink
+from .opencode import sync_agents as opencode_sync_agents
+from .opencode import unlink_agents as opencode_unlink_agents
 from .paths import DEFAULT_HOME
-from .pipeline import doctor_pipelines, list_pipelines, run_pipeline
+from .pipeline import doctor_pipelines, list_pipelines, list_roles, run_advance, run_pipeline
 from .skills import doctor_skills, list_skills
 
 
@@ -70,8 +72,13 @@ def cmd_opencode(args: argparse.Namespace) -> int:
         print_json({"status": "ok", "opencode": opencode_link(DEFAULT_HOME)})
         return 0
     if args.opencode_cmd == "unlink":
-        print_json({"status": "ok", "opencode": opencode_unlink(DEFAULT_HOME)})
+        result = opencode_unlink_agents(DEFAULT_HOME) if args.agents else opencode_unlink(DEFAULT_HOME)
+        print_json({"status": "ok", "opencode": result})
         return 0
+    if args.opencode_cmd == "sync-agents":
+        result = opencode_sync_agents(DEFAULT_HOME)
+        print_json(result)
+        return 0 if result.get("status") == "ok" else 1
     if args.opencode_cmd == "rollback":
         restored = rollback_latest(DEFAULT_HOME, kind="opencode")
         print_json({"status": "ok", "restored": restored})
@@ -133,6 +140,12 @@ def cmd_skills(args: argparse.Namespace) -> int:
 
 
 def cmd_pipeline(args: argparse.Namespace) -> int:
+    if args.pipeline_cmd == "roles":
+        if args.pipeline_roles_cmd in {"list", "doctor"}:
+            result = list_roles(DEFAULT_HOME)
+            print_json(result)
+            return 0 if result.get("status") == "ok" else 1
+        return 2
     if args.pipeline_cmd == "list":
         result = list_pipelines(DEFAULT_HOME)
         print_json(result)
@@ -153,6 +166,20 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
             args.pipeline,
             session_id=args.session_id,
             new_session_summary=args.new_session_summary,
+        )
+        print_json(result)
+        return 0 if result.get("status") == "ok" else 1
+    if args.pipeline_cmd == "advance":
+        try:
+            evidence = json.loads(args.evidence) if args.evidence is not None else None
+        except json.JSONDecodeError as exc:
+            print_json({"status": "error", "error": "invalid_evidence", "message": str(exc)})
+            return 1
+        result = run_advance(
+            DEFAULT_HOME,
+            args.session_id,
+            args.verdict,
+            evidence=evidence,
         )
         print_json(result)
         return 0 if result.get("status") == "ok" else 1
@@ -188,7 +215,9 @@ def build_parser() -> argparse.ArgumentParser:
     open_sub = p_open.add_subparsers(dest="opencode_cmd", required=True)
     open_sub.add_parser("doctor")
     open_sub.add_parser("link")
-    open_sub.add_parser("unlink")
+    p_open_unlink = open_sub.add_parser("unlink")
+    p_open_unlink.add_argument("--agents", action="store_true")
+    open_sub.add_parser("sync-agents")
     open_sub.add_parser("rollback")
     p_open.set_defaults(func=cmd_opencode)
 
@@ -222,6 +251,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_pipeline = sub.add_parser("pipeline")
     pipeline_sub = p_pipeline.add_subparsers(dest="pipeline_cmd", required=True)
+    p_pipeline_roles = pipeline_sub.add_parser("roles")
+    pipeline_roles_sub = p_pipeline_roles.add_subparsers(dest="pipeline_roles_cmd", required=True)
+    pipeline_roles_sub.add_parser("list")
+    pipeline_roles_sub.add_parser("doctor")
     pipeline_sub.add_parser("list")
     pipeline_sub.add_parser("doctor")
     p_pipeline_run = pipeline_sub.add_parser("run")
@@ -229,6 +262,10 @@ def build_parser() -> argparse.ArgumentParser:
     session_group = p_pipeline_run.add_mutually_exclusive_group(required=True)
     session_group.add_argument("--new-session-summary")
     session_group.add_argument("--session-id")
+    p_pipeline_advance = pipeline_sub.add_parser("advance")
+    p_pipeline_advance.add_argument("--session-id", required=True)
+    p_pipeline_advance.add_argument("--verdict", required=True, choices=["pass", "fail"])
+    p_pipeline_advance.add_argument("--evidence")
     p_pipeline.set_defaults(func=cmd_pipeline)
     return parser
 

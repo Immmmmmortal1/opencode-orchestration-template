@@ -98,17 +98,38 @@ class PipelineTests(unittest.TestCase):
             "skills": entries,
         })
 
-    def test_default_registry_is_empty_and_builtin_only(self) -> None:
+    def test_default_registry_is_v2_bugfix_and_dispatch_only(self) -> None:
         loaded, error = load_pipeline_registry(self.env.home)
         listed = list_pipelines(self.env.home)
         ok, diagnosed = doctor_pipelines(self.env.home, self.skills)
 
         self.assertIsNone(error)
-        self.assertEqual([], loaded["pipelines"])
+        self.assertEqual(2, loaded["version"])
+        self.assertEqual(["bugfix"], [item["id"] for item in loaded["pipelines"]])
+        self.assertEqual({"investigator", "fixer", "verifier"}, {role["id"] for role in loaded["roles"]})
         self.assertEqual("ok", listed["status"])
-        self.assertEqual("builtinOnly", listed["runtime"])
-        self.assertEqual([], listed["pipelines"])
+        self.assertEqual("dispatchOnly", listed["runtime"])
+        self.assertEqual(["bugfix"], [item["id"] for item in listed["pipelines"]])
         self.assertTrue(ok, diagnosed)
+
+    def test_v1_registry_reports_builtin_only(self) -> None:
+        self.env.write_registry("pipeline", registry())
+
+        listed = list_pipelines(self.env.home)
+        ok, diagnosed = doctor_pipelines(self.env.home, self.skills)
+
+        self.assertEqual("builtinOnly", listed["runtime"])
+        self.assertTrue(ok, diagnosed)
+
+    def test_unloadable_registry_reports_unknown_runtime(self) -> None:
+        self.env.write_registry("pipeline", [])
+
+        listed = list_pipelines(self.env.home)
+        ok, diagnosed = doctor_pipelines(self.env.home, self.skills)
+
+        self.assertEqual("unknown", listed["runtime"])
+        self.assertFalse(ok)
+        self.assertEqual("unknown", diagnosed["runtime"])
 
     def test_valid_pipeline_and_cli_commands_succeed(self) -> None:
         self.env.write_registry("pipeline", registry())

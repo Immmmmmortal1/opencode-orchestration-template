@@ -16,14 +16,18 @@ from .session import (
     finalize_session,
     load_session,
     renew_lease,
+    release_lease,
     save_session,
 )
 from .skills import list_skills
 
 
 REGISTRY_FIELDS = {"version", "pipelines"}
+V2_REGISTRY_FIELDS = {"version", "roles", "pipelines"}
+ROLE_FIELDS = {"id", "provider", "model", "description"}
 PIPELINE_FIELDS = {"id", "revision", "enabled", "entryStage", "stages", "gates", "edges"}
 STAGE_FIELDS = {"id", "skill", "maxAttempts", "params", "gates"}
+V2_STAGE_FIELDS = {"id", "role", "maxAttempts", "params", "gates"}
 GATE_FIELDS = {"id", "stage", "evaluator", "params"}
 EDGE_FIELDS = {"from", "to"}
 EDGE_FROM_FIELDS = {"stage", "gate", "verdict"}
@@ -42,6 +46,13 @@ def pipeline_registry_path(home: Path = DEFAULT_HOME) -> Path:
 
 def _fallback_path(home: Path) -> Path:
     return home / "extensions" / "pipeline.yaml"
+
+
+def _runtime_for_version(version: Any) -> str:
+    """按管线 registry 版本标记运行时能力，无法确定时保持 fail-closed。"""
+    if isinstance(version, bool) or not isinstance(version, int):
+        return "unknown"
+    return {1: "builtinOnly", 2: "dispatchOnly"}.get(version, "unknown")
 
 
 def _error(message: str) -> dict[str, str]:
@@ -77,11 +88,37 @@ def _validate_registry(
     registry: dict[str, Any],
     skills_lookup: Mapping[str, Any] | None = None,
 ) -> dict[str, str] | None:
-    error = _unknown_fields(registry, REGISTRY_FIELDS, "pipeline registry")
+    version = registry.get("version")
+    if isinstance(version, bool) or not isinstance(version, int) or version not in {1, 2}:
+        return _error("pipeline registry version must be 1 or 2")
+    is_v2 = version == 2
+    error = _unknown_fields(registry, V2_REGISTRY_FIELDS if is_v2 else REGISTRY_FIELDS, "pipeline registry")
     if error:
         return error
-    if registry.get("version") != 1:
-        return _error("pipeline registry version must be 1")
+
+    role_ids: set[str] = set()
+    if is_v2:
+        roles = registry.get("roles")
+        if not isinstance(roles, list):
+            return _error("roles must be a list")
+        for role_index, role in enumerate(roles):
+            if not isinstance(role, dict):
+                return _error(f"role at index {role_index} must be an object")
+            role_id = role.get("id")
+            if not _non_empty_string(role_id):
+                return _error(f"role at index {role_index} id must be non-empty string")
+            if role_id in role_ids:
+                return _error(f"duplicate role id: {role_id}")
+            role_ids.add(role_id)
+            error = _unknown_fields(role, ROLE_FIELDS, f"role {role_id}")
+            if error:
+                return error
+            if not _non_empty_string(role.get("provider")):
+                return _error(f"role {role_id} provider must be non-empty string")
+            for field in ("model", "description"):
+                if field in role and not _non_empty_string(role[field]):
+                    return _error(f"role {role_id} {field} must be non-empty string")
+
     pipelines = registry.get("pipelines")
     if not isinstance(pipelines, list):
         return _error("pipelines must be a list")
@@ -124,14 +161,17 @@ def _validate_registry(
             if stage_id in stage_ids:
                 return _error(f"pipeline {pipeline_id} has duplicate stage id: {stage_id}")
             stage_ids.add(stage_id)
-            error = _unknown_fields(stage, STAGE_FIELDS, f"pipeline {pipeline_id} stage {stage_id}")
+            error = _unknown_fields(stage, V2_STAGE_FIELDS if is_v2 else STAGE_FIELDS, f"pipeline {pipeline_id} stage {stage_id}")
             if error:
                 return error
-            skill_id = stage.get("skill")
-            if not _non_empty_string(skill_id):
-                return _error(f"pipeline {pipeline_id} stage {stage_id} skill must be non-empty string")
-            if skills_lookup is not None and skill_id not in skills_lookup:
-                return _error(f"pipeline {pipeline_id} stage {stage_id} references unregistered skill: {skill_id}")
+            stage_reference = stage.get("role" if is_v2 else "skill")
+            reference_kind = "role" if is_v2 else "skill"
+            if not _non_empty_string(stage_reference):
+                return _error(f"pipeline {pipeline_id} stage {stage_id} {reference_kind} must be non-empty string")
+            if is_v2 and stage_reference not in role_ids:
+                return _error(f"pipeline {pipeline_id} stage {stage_id} references undeclared role: {stage_reference}")
+            if not is_v2 and skills_lookup is not None and stage_reference not in skills_lookup:
+                return _error(f"pipeline {pipeline_id} stage {stage_id} references unregistered skill: {stage_reference}")
             max_attempts = stage.get("maxAttempts")
             if isinstance(max_attempts, bool) or not isinstance(max_attempts, int) or max_attempts <= 0:
                 return _error(f"pipeline {pipeline_id} stage {stage_id} maxAttempts must be a positive integer")
@@ -172,7 +212,7 @@ def _validate_registry(
             evaluator = gate.get("evaluator")
             if not _non_empty_string(evaluator):
                 return _error(f"pipeline {pipeline_id} gate {gate_id} evaluator must be non-empty string")
-            if skills_lookup is not None and evaluator not in skills_lookup:
+            if not is_v2 and skills_lookup is not None and evaluator not in skills_lookup:
                 return _error(f"pipeline {pipeline_id} gate {gate_id} references unregistered evaluator: {evaluator}")
             if not isinstance(gate.get("params"), dict):
                 return _error(f"pipeline {pipeline_id} gate {gate_id} params must be an object")
@@ -282,7 +322,7 @@ def _validate_registry(
         if any(not visit(stage_id) for stage_id in stage_ids):
             return _error(f"pipeline {pipeline_id} last-gate pass graph must be acyclic")
 
-        if skills_lookup is not None:
+        if not is_v2 and skills_lookup is not None:
             referenced = {
                 stage["skill"] for stage in stages
             } | {
@@ -305,14 +345,20 @@ def _validate_registry(
     return None
 
 
-def _error_payload(home: Path, error: dict[str, Any], *, include_status: bool) -> dict[str, Any]:
+def _error_payload(
+    home: Path,
+    error: dict[str, Any],
+    *,
+    include_status: bool,
+    runtime_version: Any = None,
+) -> dict[str, Any]:
     try:
         path = pipeline_registry_path(home)
     except Exception:  # noqa: BLE001
         path = _fallback_path(home)
     payload: dict[str, Any] = {
         "registry": str(path),
-        "runtime": "builtinOnly",
+        "runtime": _runtime_for_version(runtime_version),
         "pipelines": [],
         "checks": [error],
     }
@@ -326,7 +372,12 @@ def list_pipelines(home: Path = DEFAULT_HOME) -> dict[str, Any]:
     assert registry is not None
     error = _validate_registry(registry)
     if error:
-        return _error_payload(home, error, include_status=True)
+        return _error_payload(
+            home,
+            error,
+            include_status=True,
+            runtime_version=registry.get("version"),
+        )
     rows = [
         {
             "id": pipeline["id"],
@@ -339,12 +390,49 @@ def list_pipelines(home: Path = DEFAULT_HOME) -> dict[str, Any]:
         }
         for pipeline in registry["pipelines"]
     ]
-    return {
+    payload = {
         "status": "ok",
         "registry": str(pipeline_registry_path(home)),
-        "runtime": "builtinOnly",
+        "runtime": _runtime_for_version(registry.get("version")),
         "pipelines": rows,
         "checks": [{"level": "ok", "message": "pipeline registry is valid"}],
+    }
+    if registry["version"] == 2:
+        payload["roles"] = [
+            {
+                key: role[key]
+                for key in ("id", "provider", "model", "description")
+                if key in role
+            }
+            for role in registry["roles"]
+        ]
+    return payload
+
+
+def list_roles(home: Path = DEFAULT_HOME) -> dict[str, Any]:
+    registry, error = load_pipeline_registry(home)
+    if error:
+        return _error_payload(home, error, include_status=True)
+    assert registry is not None
+    validation_error = _validate_registry(registry)
+    if validation_error:
+        return _error_payload(home, validation_error, include_status=True)
+    if registry["version"] == 1:
+        return {
+            "status": "unsupported",
+            "message": "pipeline registry version 1 does not define roles",
+        }
+    return {
+        "status": "ok",
+        "version": 2,
+        "roles": [
+            {
+                key: role[key]
+                for key in ("id", "provider", "model", "description")
+                if key in role
+            }
+            for role in registry["roles"]
+        ],
     }
 
 
@@ -358,7 +446,12 @@ def doctor_pipelines(
     assert registry is not None
     error = _validate_registry(registry, skills_lookup)
     if error:
-        return False, _error_payload(home, error, include_status=False)
+        return False, _error_payload(
+            home,
+            error,
+            include_status=False,
+            runtime_version=registry.get("version"),
+        )
     listed = list_pipelines(home)
     listed.pop("status", None)
     return True, listed
@@ -511,6 +604,231 @@ def _save_with_lease(
     return saved
 
 
+def _release_dispatch_lease(home: Path, session: dict[str, Any], lease_token: str, lease_epoch: int) -> dict[str, Any]:
+    """持久化非终态 dispatch 后释放 lease，避免等待主 agent 时长期占锁。"""
+    return release_lease(home, session["id"], lease_token=lease_token, lease_epoch=lease_epoch)
+
+
+def _next_run_sequence(runs: Mapping[str, Any]) -> int:
+    """分配不依赖 JSON 对象键顺序的单调 run 序号。"""
+    sequences = [
+        run.get("sequence")
+        for run in runs.values()
+        if isinstance(run, Mapping)
+        and isinstance(run.get("sequence"), int)
+        and not isinstance(run.get("sequence"), bool)
+    ]
+    return max(sequences, default=0) + 1
+
+
+def _latest_run(runs: Any) -> tuple[str, dict[str, Any]] | None:
+    """按持久化 sequence 取最新 run；不依赖被 sort_keys 重排的字典顺序。"""
+    if not isinstance(runs, dict):
+        return None
+    candidates = [
+        (run["sequence"], run_id, run)
+        for run_id, run in runs.items()
+        if isinstance(run_id, str)
+        and isinstance(run, dict)
+        and isinstance(run.get("sequence"), int)
+        and not isinstance(run.get("sequence"), bool)
+        and run["sequence"] > 0
+    ]
+    if not candidates:
+        return None
+    _, run_id, run = max(candidates, key=lambda item: item[0])
+    return run_id, run
+
+
+def _dispatch_result(
+    session_id: str,
+    pipeline: dict[str, Any],
+    run_id: str,
+    stage_id: str,
+    role: dict[str, Any],
+) -> dict[str, Any]:
+    role_id = role["id"]
+    return {
+        "status": "ok",
+        "mode": "dispatch",
+        "sessionId": session_id,
+        "pipeline": {"id": pipeline["id"], "revision": pipeline["revision"], "runId": run_id},
+        "stage": stage_id,
+        "role": {
+            key: role[key]
+            for key in ("id", "provider", "model")
+            if key in role
+        },
+        "message": (
+            f"next: dispatch role '{role_id}' "
+            f"(provider={role['provider']}, model={role.get('model', '')})"
+        ),
+    }
+
+
+def run_advance(
+    home: Path = DEFAULT_HOME,
+    session_id: str = "",
+    verdict: str = "",
+    evidence: Any = None,
+    error: Any = None,
+) -> dict[str, Any]:
+    """回填单 gate v2 stage 结果，并推进、回退或终止当前 run。"""
+    home = Path(home)
+    if verdict not in VERDICTS:
+        return _run_error("invalid_verdict", "verdict must be pass or fail")
+
+    loaded = load_session(home, session_id)
+    if loaded.get("status") != "ok":
+        return loaded
+    session = loaded["session"]
+    if session["status"] in TERMINAL_STATUSES:
+        return _run_error("session_terminal", "terminal session cannot advance", sessionId=session_id)
+
+    leased = acquire_lease(home, session_id)
+    if leased.get("status") != "ok":
+        return leased
+    session = leased["session"]
+    lease = leased["lease"]
+    lease_token = lease["token"]
+    lease_epoch = lease["epoch"]
+
+    def release_with(result: dict[str, Any]) -> dict[str, Any]:
+        released = _release_dispatch_lease(home, session, lease_token, lease_epoch)
+        return result if released.get("status") == "ok" else released
+
+    latest = _latest_run(session.get("pipelineRuns"))
+    if latest is None:
+        return release_with(_run_error("pipeline_run_not_found", "session has no sequenced pipeline run"))
+    run_id, run = latest
+    if run.get("status") != "active":
+        return release_with(_run_error("pipeline_run_inactive", "latest pipeline run is not active"))
+
+    registry, registry_error = load_pipeline_registry(home)
+    if registry_error:
+        return release_with(_run_error("pipeline_registry_invalid", registry_error["message"]))
+    assert registry is not None
+    validation_error = _validate_registry(registry)
+    if validation_error:
+        return release_with(_run_error("pipeline_registry_invalid", validation_error["message"]))
+    if registry["version"] != 2:
+        return release_with(_run_error("pipeline_advance_unsupported", "pipeline advance requires registry version 2"))
+
+    selected = next(
+        (
+            item
+            for item in registry["pipelines"]
+            if item["id"] == run.get("pipelineId") and item["revision"] == run.get("pipelineRevision")
+        ),
+        None,
+    )
+    if selected is None:
+        return release_with(_run_error("pipeline_not_found", "pipeline revision for latest run does not exist"))
+
+    stages = {stage["id"]: stage for stage in selected["stages"]}
+    roles = {role["id"]: role for role in registry["roles"]}
+    current_stage = session.get("currentStep")
+    stage = stages.get(current_stage)
+    if stage is None or run.get("currentStage") != current_stage:
+        return release_with(_run_error("pipeline_state_invalid", "current pipeline stage is invalid"))
+    if len(stage["gates"]) != 1:
+        return release_with(_run_error("unsupported_multi_gate", "pipeline advance supports exactly one gate per stage"))
+
+    gate_id = stage["gates"][0]
+    gate = next(item for item in selected["gates"] if item["id"] == gate_id)
+    attempt_no = run["attempts"].get(current_stage, 0) + 1
+    run["attempts"][current_stage] = attempt_no
+    gate_result = {
+        "gateKey": {
+            **_stable_stage_key(session_id, selected["revision"], run_id, current_stage, attempt_no),
+            "gateId": gate_id,
+        },
+        "evaluator": gate["evaluator"],
+        "verdict": verdict,
+        "evidenceRef": None,
+        "evidence": evidence,
+        "schemaVersion": 1,
+        "invalidatedReason": None,
+    }
+    if error is not None:
+        gate_result["error"] = error
+    run["gateResults"].append(gate_result)
+
+    terminal_reason: str | None = None
+    next_stage: str | None = None
+    target = _edge_target(selected, current_stage, gate_id, verdict)
+    if verdict == "pass":
+        if target.get("terminal") == "succeeded":
+            terminal_reason = "succeeded"
+        else:
+            next_stage = target.get("stage")
+    else:
+        fail_target = target.get("stage")
+        decision = decide_terminal(
+            "failure",
+            fail_target,
+            attempt_no=run["attempts"].get(fail_target, 0) if fail_target is not None else None,
+            max_attempts=stages[fail_target]["maxAttempts"] if fail_target is not None else None,
+        )
+        if decision["action"] == "terminate":
+            terminal_reason = decision["terminalReason"]
+        else:
+            next_stage = decision["targetStage"]
+
+    if terminal_reason is None and verdict == "fail" and next_stage is not None:
+        invalidated_stages = _downstream_stages(selected, next_stage)
+        reason = f"rollback_to:{next_stage}"
+        for result in run["gateResults"]:
+            if result["gateKey"]["stageId"] in invalidated_stages and result["invalidatedReason"] is None:
+                result["invalidatedReason"] = reason
+
+    if terminal_reason is None and next_stage not in stages:
+        return release_with(_run_error("pipeline_state_invalid", "edge target stage is invalid"))
+
+    if terminal_reason is not None:
+        run["status"] = "succeeded" if terminal_reason == "succeeded" else "failed"
+        run["terminalReason"] = terminal_reason
+    else:
+        assert next_stage is not None
+        run["currentStage"] = next_stage
+        session["currentStep"] = next_stage
+
+    saved = _save_with_lease(home, session, lease_token, lease_epoch, lease, now_ns=None)
+    if saved.get("status") != "ok":
+        return release_with(saved)
+    session = saved["session"]
+
+    pipeline_result = {"id": selected["id"], "revision": selected["revision"], "runId": run_id}
+    if terminal_reason is not None:
+        session_status = "succeeded" if terminal_reason == "succeeded" else "failed"
+        finalized = finalize_session(
+            home,
+            session_id,
+            lease_token=lease_token,
+            lease_epoch=lease_epoch,
+            terminal_status=session_status,
+            result={"status": session_status, "refs": []},
+            error=None if session_status == "succeeded" else {"code": terminal_reason},
+            extra_fields={"pipelineRuns": session["pipelineRuns"], "currentStep": session.get("currentStep")},
+        )
+        if finalized.get("status") != "ok":
+            return finalized
+        return {
+            "status": "ok",
+            "mode": "terminal",
+            "sessionId": session_id,
+            "pipeline": pipeline_result,
+            "terminalReason": terminal_reason,
+        }
+
+    released = _release_dispatch_lease(home, session, lease_token, lease_epoch)
+    if released.get("status") != "ok":
+        return released
+    assert next_stage is not None
+    role = roles[stages[next_stage]["role"]]
+    return _dispatch_result(session_id, selected, run_id, next_stage, role)
+
+
 def run_pipeline(
     home: Path = DEFAULT_HOME,
     pipeline_id: str = "",
@@ -536,10 +854,12 @@ def run_pipeline(
         if registry_error:
             return _run_error("pipeline_registry_invalid", registry_error["message"])
         assert registry is not None
-        skills_lookup, skills_error = _skills_lookup(home)
-        if skills_error:
-            return skills_error
-        assert skills_lookup is not None
+        skills_lookup: Mapping[str, Any] | None = None
+        if registry.get("version") == 1:
+            skills_lookup, skills_error = _skills_lookup(home)
+            if skills_error:
+                return skills_error
+            assert skills_lookup is not None
         validation_error = _validate_registry(registry, skills_lookup)
         if validation_error:
             return _run_error("pipeline_registry_invalid", validation_error["message"])
@@ -577,6 +897,7 @@ def run_pipeline(
         stages = {stage["id"]: stage for stage in selected["stages"]}
         gates = {gate["id"]: gate for gate in selected["gates"]}
         current_stage = selected["entryStage"]
+        pipeline_runs = session.setdefault("pipelineRuns", {})
         run = {
             "schemaVersion": 1,
             "pipelineId": selected["id"],
@@ -588,7 +909,9 @@ def run_pipeline(
             "stageExecutions": [],
             "gateResults": [],
         }
-        session.setdefault("pipelineRuns", {})[run_id] = run
+        if registry["version"] == 2:
+            run["sequence"] = _next_run_sequence(pipeline_runs)
+        pipeline_runs[run_id] = run
         session["currentStep"] = current_stage
         saved = _save_with_lease(
             home, session, lease_token, lease_epoch, lease, now_ns=now_ns
@@ -600,6 +923,14 @@ def run_pipeline(
             )
         session = saved["session"]
         lease = saved["lease"]
+
+        if registry["version"] == 2:
+            role_id = stages[current_stage]["role"]
+            role = next(role for role in registry["roles"] if role["id"] == role_id)
+            released = _release_dispatch_lease(home, session, lease_token, lease_epoch)
+            if released.get("status") != "ok":
+                return released
+            return _dispatch_result(active_session_id, selected, run_id, current_stage, role)
 
         terminal_reason: str | None = None
         while terminal_reason is None:

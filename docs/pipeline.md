@@ -1,6 +1,11 @@
 # Pipeline 编排模型（Phase 3 设计）
 
-本文定义 Phase 3（编排运行时）的核心模型：**用流水线（Pipeline）编排，用 skill 执行。**
+本文定义 Phase 3（编排运行时）的核心模型：**用流水线（Pipeline）编排，阶段绑定一个"执行者"。**
+
+执行者有两代：**v1 = 已注册 skill**（3A 已实现，见第 2、3 节）；**v2 = role（角色）**（2026-10-08
+方向调整后的前进方向，见第 2.4 节）——v2 下 orchAgent **不执行 skill**，只输出"该派哪个 role、
+用哪个 provider/model"的**派发指令**，真正的 LLM 调用交给宿主（opencode / codex）。
+**v1 语义保留可用，但不再是前进方向。**
 
 **在 pipeline 编排模型范围内，本文是唯一规范源。** 其他文档（`design-decisions.md` D12、`architecture.md`、
 `roadmap.md`、`skills.md`、`agent-contract.md`）可以保留**摘要**（便于就地阅读），但**不得复制完整定义**；
@@ -9,9 +14,11 @@ pipeline 编排模型内的**文档间**表述冲突，以本文为准。
 
 对应设计决策：[`design-decisions.md`](design-decisions.md) 的 **D12**。
 
-> 本文既含**设计**也含**已实现**部分。**Phase 3A（第 10.2 节范围）已实现、审查通过并发布 v0.8.0**；
-> 3A 之后的 3B/3C 部分仍为设计（3B-0 设计文档已落，实现未开始，见
-> [`capability-seams.md`](capability-seams.md)）。3A/3B/3C 的拆分见第 10 节。
+> 本文既含**设计**也含**已实现**部分。**Phase 3A（v1，skill-based）已实现、审查通过并发布 v0.8.0**；
+> **v2（role-based dispatch + advance + opencode agent 生成）已实现**（见第 2.4 节，对应设计决策
+> [`design-decisions.md`](design-decisions.md) D14）。原 3B skill/MCP capability seam（3B-0 设计文档已落）
+> 因 **2026-10-08 方向调整（skill / MCP 归宿主）已暂停**，见 [`capability-seams.md`](capability-seams.md)。
+> 分期见第 10 节。
 
 ## 1. 为什么需要这个模型
 
@@ -44,21 +51,23 @@ Pipeline = 组合层（只负责编排：阶段怎么排、门禁挂哪里、不
 Skill    = 执行层（只负责干活：单一业务能力，输入→输出）
 ```
 
-## 2. 四个概念
+## 2. 概念（v1：skill 执行；v2：role 派发）
 
 | 概念 | 定义 |
 |---|---|
 | **Pipeline** | 一条流水线的定义 = **阶段 + 门禁 + 回退边** |
-| **Stage** | 一个阶段。**只做一件事**；`skill` 字段必须引用**已注册 skill**；声明 `input`/`output` |
-| **Gate** | 门禁。**纯声明**，通过 `evaluator`（**已注册 skill 的 id**）检查产出；`pass` → 前进，`fail` → **回退到指定阶段**或终止 |
-| **Skill** | **最小执行单元** = 单一业务能力（单一职责）；纯输入→输出（工厂方法式）；不知道调用方是谁 |
+| **Stage** | 一个阶段。**只做一件事**。v1：`stage.skill` 必须引用**已注册 skill**、声明 `input`/`output`；v2：`stage.role` 必须引用**已声明的 role**（见 §2.4） |
+| **Gate** | 门禁。**纯声明**，通过 `evaluator` 检查产出；`pass` → 前进，`fail` → **回退到指定阶段**或终止。v1 的 `evaluator` 引用**已注册 skill 的 id**；v2 的 `evaluator` 是**描述性 id**（判定由调用方按门禁语义回填 `verdict`，见 §2.4） |
+| **Skill** | **最小执行单元**（v1）= 单一业务能力（单一职责）；纯输入→输出（工厂方法式）；不知道调用方是谁 |
+| **Role**（v2） | **执行者声明** = `id` + `provider` + `model`（**只存名字、不存凭证**）。orchAgent **不调用**它，只把"该派这个 role"作为指令交给**宿主**（见 §2.4） |
 
 **字段命名（避免歧义，重要）**：
 
-- `stage.skill` = 该阶段引用的**已注册 skill 的 id**；
+- `stage.skill`（v1）= 该阶段引用的**已注册 skill 的 id**；
+- `stage.role`（v2）= 该阶段引用的**已声明 role 的 id**；
 - `skill.backend` = 该 skill 的**实现后端**：`builtin` 或 `agent`。
 
-两者是不同层级的概念，**不得复用同一个字段名**。
+以上是不同层级的概念，**不得复用同一个字段名**。
 
 ### 2.1 关系图
 
@@ -78,7 +87,71 @@ Pipeline ──┬── Stage(skill=code-locate)  ──▶ Gate(evaluator=...,
 | 实施 | `implement` | `impl-process-review`（fail → 回退实施）<br>`impl-result-review`（fail → 回退实施） |
 | 自测 | `self-test` | `test-accept`（依据 = 计划期固化的验收条件） |
 
+### 2.3 v1 与 v2 的关系
+
+- **同一 registry 只属于一代**，由顶层 `version` 区分（严格整数 `1` 或 `2`）。
+- v2 registry 中出现 `stage.skill` → **fail-closed**；v1 registry 中出现 `roles` → **fail-closed**。
+  两代**不混用**，避免"半 v1 半 v2"的歧义。
+- v1 **保留可用**（`builtinOnly` runner），但**不再是前进方向**；新流水线一律用 v2。
+
+### 2.4 v2：role 派发模型（当前方向，2026-10-08）
+
+v2 的核心：**orchAgent 只做编排与派发，不执行、不调 LLM、不碰 API key。**
+
+**registry 结构（v2）**：
+
+```json
+{
+  "version": 2,
+  "roles": [
+    { "id": "investigator", "provider": "deepseek", "model": "deepseek-v4-flash", "description": "..." }
+  ],
+  "pipelines": [
+    { "id": "bugfix", "revision": "1", "enabled": true, "entryStage": "investigate",
+      "stages": [ { "id": "investigate", "role": "investigator", "maxAttempts": 2,
+                    "gates": ["gate-investigate-evidence"] } ],
+      "gates": [ { "id": "gate-investigate-evidence", "stage": "investigate",
+                   "evaluator": "gate-investigate-evidence", "params": {} } ],
+      "edges": [ { "from": {"stage":"investigate","gate":"gate-investigate-evidence","verdict":"pass"},
+                   "to": {"stage":"repro"} } ] }
+  ]
+}
+```
+
+**role 字段**：`id` / `provider` / `model` / `description`（**仅此四项**）。
+`provider` / `model` 只是**名字**；凭证字段（`api_key` / `key` / `token` / `secret` / `env`）**一律拒收**。
+
+**两条命令构成一个循环**（状态落 `session`，见 D11）：
+
+1. **`pipeline run`（dispatch 模式）**：建/载 session → 取 `entryStage` 的 role →
+   **输出派发指令后停止**（不执行、不推进），释放 lease：
+   ```json
+   { "status":"ok","mode":"dispatch","sessionId":"...",
+     "pipeline":{"id":"bugfix","revision":"1","runId":"..."},
+     "stage":"investigate","role":{"id":"investigator","provider":"deepseek","model":"deepseek-v4-flash"},
+     "message":"next: dispatch role 'investigator' (provider=deepseek, model=deepseek-v4-flash)" }
+   ```
+2. **`pipeline advance --session-id <id> --verdict pass|fail [--evidence <json>]`**：回填当前门禁结果，
+   复用 §5 的终止决策表与回退边语义：
+   - `pass` → 沿 pass 边到下一 stage（输出新的派发指令）或 `succeeded` 落终态；
+   - `fail` → 沿 fail 边**回退**到指定 stage、或（无回退目标）`gate_rejected`、
+     或（额度用尽）`attempts_exhausted`；
+   - 已达终态的 session 再 advance → `session_terminal`（fail-closed）。
+
+   「当前 run」用 run 上**单调 `sequence`** 选取，**不依赖** JSON 持久化的 `sort_keys` 顺序。
+
+**与宿主的关系**：`message` 里的 role/provider/model 是给**调用方（主 agent / 宿主）**看的；
+宿主按自己的 agent `model` 配置真正发起调用。role → provider 的绑定**可换**（改 registry 的 `roles[]`），
+`pipelines[]` 一个字不改。
+
+**接入宿主（opencode）**：`orchagent opencode sync-agents` 按 v2 pipeline 生成/更新托管 agent 定义
+（`agent.orchagent-<pipeline-id>`，带 `orchAgent-managed` marker，`prompt` 内嵌阶段序列、门禁与回退边、
+以及 `run`/`advance` 的调用说明）；`orchagent opencode unlink --agents` 只删带 marker 者。
+**未托管同名 agent → 拒绝覆盖**（fail-closed）。生成的 agent 定义**不含任何凭证**。
+
 ## 3. 硬约束
+
+以下 1–5 条是 **v1（skill 执行）** 的硬约束；第 6 条是 **v2（role 派发）** 的。
 
 1. **`stage.skill` 只能引用已注册 skill。** 引用不存在的 skill → **fail-closed（直接失败）**。
    不允许"兜底成自由发挥"——那会让第 1.2 节的审查成本立刻回归。
@@ -96,6 +169,9 @@ Pipeline ──┬── Stage(skill=code-locate)  ──▶ Gate(evaluator=...,
 4. **skill 不知道外部。** 不接收 pipeline 上下文、不引用其他 skill；**输入与输出就是它的全部接口**。
 5. **状态推进走 session。** 阶段状态、门禁结果落 `session`（见 [`session-lock-lease.md`](session-lock-lease.md)）；
    并发由 lock/lease 保护，不由 skill 自行处理。
+6. **（v2）`stage.role` 只能引用本 registry 已声明的 role。** 引用未声明的 role → **fail-closed**；
+   **role 只声明 provider / model 的「名字」**，出现凭证字段（`api_key`/`key`/`token`/`secret`/`env`）→ **拒收**；
+   **orchAgent 不调用 LLM、不执行、不碰 API key**——真正调用交给宿主（见 §2.4）。
 
 ### 3.1 差异只来自编排
 
@@ -120,6 +196,9 @@ Pipeline ──┬── Stage(skill=code-locate)  ──▶ Gate(evaluator=...,
 不持有流水线上下文。确定性断言同样如此（注册为 `builtin` skill），不存在"引擎内建免注册"的例外。
 
 ## 4. Skill 的 I/O 契约（Phase 3 扩展，尚未实现）
+
+> **本节属 v1（skill 执行）**：v2 的 stage 引用 role、不再引用 skill，因此本节的 `backend` / I/O 契约
+> **不适用于 v2**。保留于此供 v1 参考。
 
 ### 4.0 字段引入分期
 
@@ -351,9 +430,13 @@ runner 在 stage/gate 边界续约失败属于失权事件，不再进入回退�
 
 | 子阶段 | 内容 | 验证目标 |
 |---|---|---|
-| **3A** | Pipeline 定义 + session 集成；阶段/门禁/回退边 + §5 回退语义；`stage.skill` 与 `gate.evaluator` 均引用**已注册 skill**；补齐最小 `backend` 字段判别（见 §4.0） | 证明「带门禁和回退边的状态机」可行，**不碰通用引擎**；**3A 起就强制 skill 注册约束** |
+| **3A** | （v1）Pipeline 定义 + session 集成；阶段/门禁/回退边 + §5 回退语义；`stage.skill` 与 `gate.evaluator` 均引用**已注册 skill**；补齐最小 `backend` 字段判别（见 §4.0） | 证明「带门禁和回退边的状态机」可行，**不碰通用引擎**；**3A 起就强制 skill 注册约束**。**已实现并发布 v0.8.0** |
+| **v2**（2026-10-08 方向调整） | role registry + `stage.role` + `pipeline run`(dispatch) / `pipeline advance` + `opencode sync-agents`（见 §2.4、[D14](design-decisions.md)） | 编排单元改为 **role**、**执行交宿主**；orchAgent 不调 LLM / 不碰 key。**已实现** |
 | **3B** | Skill / MCP capability seam（可插拔）+ 完整 I/O 契约 + agent 后端。**子期划分以 [`capability-seams.md`](capability-seams.md) §9 为唯一定义**（本文不复制子期表）；⚠️ 2026-10-08 方向调整：skill/MCP 归宿主、编排层不关心，本分期**暂停待重设** | 扩展能力，**不引入** 3A 尚不存在的 skill 强制边界 |
-| **3C** | 路由 + **第一条真实流水线**（bug 修复）端到端 | 用真实流水线检验模型 |
+| **3C** | 路由 + **第一条真实流水线**（bug 修复）端到端 | 用真实流水线检验模型。**v2 `bugfix` 管线（investigate→repro→fix→verify）已端到端跑通**（含门禁与回退边） |
+
+> ⚠️ **v1（3A）与 v2 并存**：v1 的 skill 强制约束见于本节第 1–5 条硬约束与 §4；**v2 以 §2.4 + 第 6 条
+> 硬约束为准**，v2 不引用 skill。二者由 registry `version` 区分，不混用。
 
 **3A 即可验证核心机制**（含第 5 节回退边语义），无需先建通用引擎。
 

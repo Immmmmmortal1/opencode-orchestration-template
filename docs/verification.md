@@ -254,7 +254,7 @@ python3 -m unittest discover -s tests
 | 文件 | 覆盖 |
 |---|---|
 | `tests/test_install_opencode.py` | 安装幂等、备份目录位置（D8）、install rollback 一次性、opencode link/doctor/unlink/rollback 闭环、`OPENCODE_CONFIG` 强隔离（D6：默认两路径 byte-for-byte 不变且不被扫描）、symlink/dangling symlink、未托管字段拒绝覆盖 |
-| `tests/test_extensions.py` | 五类 runtime 状态（hooks=dryRunOnly / knowledge=searchOnly / pipeline=builtinOnly / skills,mcp=notImplemented）、`--type` 过滤、非对象 registry fail-closed、registry 缺失 |
+| `tests/test_extensions.py` | 五类 runtime 状态（hooks=dryRunOnly / knowledge=searchOnly / pipeline=[v1=`builtinOnly`、v2=`dispatchOnly`、不可载入=`unknown`] / skills,mcp=notImplemented）、`--type` 过滤、非对象 registry fail-closed、registry 缺失 |
 | `tests/test_hooks.py` | 默认 list/doctor、run --dry-run planned/skipped、未匹配 event、非法 enabled/type fail-closed、disabled adapter 不掩盖非法 type、unsupported type、未带 `--dry-run` 拒绝、dry-run 无副作用 |
 | `tests/test_knowledge.py` | registry 契约 fail-closed、越界/敏感名（含前导点）/中间段 symlink/硬链接拦截、预算限制（单文件/结果数/行宽/entry/file/累计字节）与多 source 共享预算、local_cli disabled 未执行（marker 证明）、输出超限、超时、argv 无 shell 展开、慢 local_cli 不吃 filesystem 预算 |
 | `tests/test_cli_smoke.py` | 核心命令端到端返回码与 JSON 契约 |
@@ -376,6 +376,8 @@ ORCHAGENT_HOME="$tmp/home" OPENCODE_CONFIG="$tmp/oc.json" ./bin/orchagent pipeli
 | `tests/test_pipeline.py` | pipeline registry 结构与引用 fail-closed（未知字段/版本/重复 id/entryStage/edge 完整性/maxAttempts）；`stage.skill` 与 `gate.evaluator` 未注册、**disabled**、非 builtin、catalog 无实现；runner 成功路径、`gate_rejected`、**回退 + attempts 用尽**、**同 stage 多 gate 整体失效**、多 gate 全通过的推进解释；稳定键（stage_key/gate_key）字段齐全；终止决策表 6 行 + timeout 输入；引用非法 skill 时**无 session 副作用**；active lease 不被抢占；lease 在终止时释放 |
 | `tests/test_builtin_skills.py` | 两个 fixture builtin skill（`emit-json` / `assert-json-path-equals`）的成功与错误路径；JSONPath-lite 边界（不支持数组下标/通配） |
 | `tests/test_session_lock_lease.py` | 新增 `finalize_session` 语义（写终态 + 释放 lease、过期/重复拒绝）与 `terminal_status_path`（走合法路径到达终态） |
+| `tests/test_pipeline_v2.py` | v2 registry 严格性（未知字段/版本/重复 role id/凭证字段 `api_key`/`key`/`token`/`secret`/`env` 拒收/`stage.role` 引用缺失→fail-closed/v2 出现 `skill` 与 v1 出现 `roles` 均 fail-closed）；`pipeline roles list\|doctor`；`pipeline run` dispatch 输出（stage/role/sessionId）；`pipeline advance` 推进 / 回退 / 终止（`succeeded` / `gate_rejected` / `attempts_exhausted`）/`invalid_verdict`/`session_terminal`/`unsupported_multi_gate`；run `sequence` 取最新；advance 后 lease 已释放；v1 行为不变 |
+| `tests/test_opencode_agents.py` | `opencode sync-agents` 生成托管 agent（`orchAgent-managed` marker / description / prompt 含阶段序列与 `pipeline advance` 指令 / **无 key 泄漏**）；幂等 no-op；未托管同名冲突 fail-closed（不覆盖）；v1 registry → `unsupported`；`unlink --agents` 只删带 marker 者 |
 
 验证结果：以当前 `python3 -m unittest discover -s tests` 的实际输出为准，不在文档中写死用例数。
 

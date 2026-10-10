@@ -27,11 +27,20 @@ class ExtensionsTests(unittest.TestCase):
                 "skills": "notImplemented",
                 "mcp": "notImplemented",
                 "knowledge": "searchOnly",
-                "pipeline": "builtinOnly",
+                "pipeline": "dispatchOnly",
             },
             {kind: row["runtime"] for kind, row in rows.items()},
         )
         self.assertTrue(all(row["status"] == "declared" for row in rows.values()))
+
+    def test_v1_pipeline_registry_reports_builtin_only(self) -> None:
+        self.env.write_registry("pipeline", {"version": 1, "pipelines": []})
+
+        code, payload, _, stderr = self.env.run_cli("extensions", "list")
+
+        self.assertEqual(0, code, stderr)
+        rows = {row["type"]: row for row in payload["extensions"]}
+        self.assertEqual("builtinOnly", rows["pipeline"]["runtime"])
 
     def test_type_filter_only_returns_knowledge(self) -> None:
         code, payload, _, _ = self.env.run_cli(

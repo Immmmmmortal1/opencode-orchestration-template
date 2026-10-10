@@ -92,11 +92,12 @@ extensions/pipeline.yaml
 hooks: declared + runtime:dryRunOnly
 knowledge: declared + runtime:searchOnly
 skills/mcp: declared + runtime:notImplemented
-pipeline: declared + runtime:builtinOnly
+pipeline: declared + runtime:builtinOnly（v1）/ dispatchOnly（v2）
 ```
 
 含义：配置已被索引和校验；hooks 只做 dry-run，knowledge 只允许显式 list/search，
-pipeline 只执行 `builtin` 后端 skill，skills/MCP 尚未执行。
+pipeline v1 只执行 `builtin` 后端 skill、v2 只输出 role 派发指令（不执行，见 [`pipeline.md`](pipeline.md) §2.4），
+skills/MCP 尚未执行。
 任何实现不得把 `declared` 伪装成已运行。
 
 > **可插拔能力模型（Phase 3B）**：skills / MCP 将演进为 **capability seam**
