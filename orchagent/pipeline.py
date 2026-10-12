@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
+import re
 import uuid
 
 from .builtin_skills import BUILTIN_SKILL_IMPLEMENTATIONS, execute_builtin
@@ -26,6 +27,8 @@ REGISTRY_FIELDS = {"version", "pipelines"}
 V2_REGISTRY_FIELDS = {"version", "roles", "pipelines"}
 ROLE_FIELDS = {"id", "provider", "model", "description"}
 PIPELINE_FIELDS = {"id", "revision", "enabled", "entryStage", "stages", "gates", "edges"}
+V2_PIPELINE_FIELDS = PIPELINE_FIELDS | {"route"}
+ROUTE_FIELDS = {"taskTypes", "priority"}
 STAGE_FIELDS = {"id", "skill", "maxAttempts", "params", "gates"}
 V2_STAGE_FIELDS = {"id", "role", "maxAttempts", "params", "gates"}
 GATE_FIELDS = {"id", "stage", "evaluator", "params"}
@@ -34,6 +37,9 @@ EDGE_FROM_FIELDS = {"stage", "gate", "verdict"}
 EDGE_TO_FIELDS = {"terminal", "stage"}
 VERDICTS = {"pass", "fail"}
 TERMINALS = {"succeeded"}
+TASK_TYPES = frozenset({"bug", "feature", "ui_review", "research", "design", "qa"})
+PIPELINE_TASK_TYPES = frozenset({"bug", "feature", "ui_review"})
+SAFE_IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 LEASE_RENEW_THRESHOLD_DIVISOR = 3
 
 
@@ -61,6 +67,10 @@ def _error(message: str) -> dict[str, str]:
 
 def _non_empty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _safe_identifier(value: Any) -> bool:
+    return isinstance(value, str) and SAFE_IDENTIFIER_PATTERN.fullmatch(value) is not None
 
 
 def _unknown_fields(value: dict[str, Any], allowed: set[str], label: str) -> dict[str, str] | None:
@@ -105,8 +115,8 @@ def _validate_registry(
             if not isinstance(role, dict):
                 return _error(f"role at index {role_index} must be an object")
             role_id = role.get("id")
-            if not _non_empty_string(role_id):
-                return _error(f"role at index {role_index} id must be non-empty string")
+            if not _safe_identifier(role_id):
+                return _error(f"role at index {role_index} id must use safe identifier syntax")
             if role_id in role_ids:
                 return _error(f"duplicate role id: {role_id}")
             role_ids.add(role_id)
@@ -128,18 +138,45 @@ def _validate_registry(
         if not isinstance(pipeline, dict):
             return _error(f"pipeline at index {pipeline_index} must be an object")
         pipeline_id = pipeline.get("id")
-        if not _non_empty_string(pipeline_id):
+        if is_v2 and not _safe_identifier(pipeline_id):
+            return _error(f"pipeline at index {pipeline_index} id must use safe identifier syntax")
+        if not is_v2 and not _non_empty_string(pipeline_id):
             return _error(f"pipeline at index {pipeline_index} id must be non-empty string")
         if pipeline_id in pipeline_ids:
             return _error(f"duplicate pipeline id: {pipeline_id}")
         pipeline_ids.add(pipeline_id)
-        error = _unknown_fields(pipeline, PIPELINE_FIELDS, f"pipeline {pipeline_id}")
+        error = _unknown_fields(
+            pipeline,
+            V2_PIPELINE_FIELDS if is_v2 else PIPELINE_FIELDS,
+            f"pipeline {pipeline_id}",
+        )
         if error:
             return error
-        if not _non_empty_string(pipeline.get("revision")):
+        if is_v2 and not _safe_identifier(pipeline.get("revision")):
+            return _error(f"pipeline {pipeline_id} revision must use safe identifier syntax")
+        if not is_v2 and not _non_empty_string(pipeline.get("revision")):
             return _error(f"pipeline {pipeline_id} revision must be non-empty string")
         if not isinstance(pipeline.get("enabled"), bool):
             return _error(f"pipeline {pipeline_id} enabled must be boolean")
+        if is_v2 and "route" in pipeline:
+            route = pipeline["route"]
+            if not isinstance(route, dict):
+                return _error(f"pipeline {pipeline_id} route must be an object")
+            error = _unknown_fields(route, ROUTE_FIELDS, f"pipeline {pipeline_id} route")
+            if error:
+                return error
+            task_types = route.get("taskTypes")
+            if not isinstance(task_types, list) or not task_types:
+                return _error(f"pipeline {pipeline_id} route taskTypes must be a non-empty list")
+            if any(item not in PIPELINE_TASK_TYPES for item in task_types):
+                return _error(
+                    f"pipeline {pipeline_id} route taskTypes must contain only bug, feature, or ui_review"
+                )
+            if len(task_types) != len(set(task_types)):
+                return _error(f"pipeline {pipeline_id} route taskTypes must not contain duplicates")
+            priority = route.get("priority")
+            if isinstance(priority, bool) or not isinstance(priority, int) or priority < 0:
+                return _error(f"pipeline {pipeline_id} route priority must be a non-negative integer")
         stages = pipeline.get("stages")
         gates = pipeline.get("gates")
         edges = pipeline.get("edges")
@@ -156,7 +193,11 @@ def _validate_registry(
             if not isinstance(stage, dict):
                 return _error(f"pipeline {pipeline_id} stage at index {stage_index} must be an object")
             stage_id = stage.get("id")
-            if not _non_empty_string(stage_id):
+            if is_v2 and not _safe_identifier(stage_id):
+                return _error(
+                    f"pipeline {pipeline_id} stage at index {stage_index} id must use safe identifier syntax"
+                )
+            if not is_v2 and not _non_empty_string(stage_id):
                 return _error(f"pipeline {pipeline_id} stage at index {stage_index} id must be non-empty string")
             if stage_id in stage_ids:
                 return _error(f"pipeline {pipeline_id} has duplicate stage id: {stage_id}")
@@ -196,7 +237,11 @@ def _validate_registry(
             if not isinstance(gate, dict):
                 return _error(f"pipeline {pipeline_id} gate at index {gate_index} must be an object")
             gate_id = gate.get("id")
-            if not _non_empty_string(gate_id):
+            if is_v2 and not _safe_identifier(gate_id):
+                return _error(
+                    f"pipeline {pipeline_id} gate at index {gate_index} id must use safe identifier syntax"
+                )
+            if not is_v2 and not _non_empty_string(gate_id):
                 return _error(f"pipeline {pipeline_id} gate at index {gate_index} id must be non-empty string")
             if gate_id in gate_ids:
                 return _error(f"pipeline {pipeline_id} has duplicate gate id: {gate_id}")
@@ -492,6 +537,85 @@ def decide_terminal(
 
 def _run_error(code: str, message: str, **fields: Any) -> dict[str, Any]:
     return {"status": "error", "error": code, "message": message, **fields}
+
+
+def route_pipeline(home: Path = DEFAULT_HOME, task_type: str = "") -> dict[str, Any]:
+    """将宿主提供的 task type 确定性映射到一个 v2 pipeline revision。"""
+    home = Path(home)
+    if not isinstance(task_type, str) or task_type not in TASK_TYPES:
+        return _run_error("invalid_task_type", "task type must be one of the fixed task types")
+    if task_type not in PIPELINE_TASK_TYPES:
+        return _run_error(
+            "pipeline_task_type_unsupported",
+            "task type is not allowed to enter a pipeline",
+            taskType=task_type,
+        )
+
+    registry, registry_error = load_pipeline_registry(home)
+    if registry_error:
+        return _run_error("pipeline_registry_invalid", registry_error["message"])
+    assert registry is not None
+    validation_error = _validate_registry(registry)
+    if validation_error:
+        return _run_error("pipeline_registry_invalid", validation_error["message"])
+    if registry["version"] == 1:
+        return {
+            "status": "unsupported",
+            "error": "pipeline_route_unsupported",
+            "message": "pipeline route requires registry version 2",
+            "mode": "route",
+            "taskType": task_type,
+        }
+
+    matches = [
+        pipeline
+        for pipeline in registry["pipelines"]
+        if pipeline["enabled"]
+        and isinstance(pipeline.get("route"), dict)
+        and task_type in pipeline["route"]["taskTypes"]
+    ]
+    if not matches:
+        return _run_error(
+            "pipeline_route_no_match",
+            "no enabled pipeline route matches task type",
+            mode="route",
+            taskType=task_type,
+            candidates=[],
+        )
+
+    minimum_priority = min(pipeline["route"]["priority"] for pipeline in matches)
+    winners = sorted(
+        (pipeline for pipeline in matches if pipeline["route"]["priority"] == minimum_priority),
+        key=lambda pipeline: (pipeline["id"], pipeline["revision"]),
+    )
+    candidates = [
+        {"id": pipeline["id"], "revision": pipeline["revision"], "priority": minimum_priority}
+        for pipeline in winners
+    ]
+    if len(winners) != 1:
+        return _run_error(
+            "pipeline_route_conflict",
+            "multiple pipeline routes share the lowest priority",
+            mode="route",
+            taskType=task_type,
+            priority=minimum_priority,
+            candidates=candidates,
+        )
+
+    selected = winners[0]
+    return {
+        "status": "ok",
+        "mode": "route",
+        "taskType": task_type,
+        "pipeline": {"id": selected["id"], "revision": selected["revision"]},
+        "priority": minimum_priority,
+        "candidates": candidates,
+        "run": {
+            "pipeline": selected["id"],
+            "pipelineRevision": selected["revision"],
+            "taskType": task_type,
+        },
+    }
 
 
 def _skills_lookup(home: Path) -> tuple[dict[str, dict[str, Any]] | None, dict[str, Any] | None]:
@@ -833,6 +957,8 @@ def run_pipeline(
     home: Path = DEFAULT_HOME,
     pipeline_id: str = "",
     *,
+    pipeline_revision: str | None = None,
+    task_type: str | None = None,
     session_id: str | None = None,
     new_session_summary: str | None = None,
     now_ns: Clock = None,
@@ -842,7 +968,17 @@ def run_pipeline(
     if (session_id is None) == (new_session_summary is None):
         return _run_error("invalid_session_selection", "provide exactly one of session_id or new_session_summary")
     if not _non_empty_string(pipeline_id):
-        return _run_error("invalid_pipeline_id", "pipeline id must be a non-empty string")
+        return _run_error("invalid_pipeline_id", "pipeline id must be non-empty string")
+    if pipeline_revision is not None and not _non_empty_string(pipeline_revision):
+        return _run_error("invalid_pipeline_revision", "pipeline revision must be non-empty string")
+    if task_type is not None and (not isinstance(task_type, str) or task_type not in TASK_TYPES):
+        return _run_error("invalid_task_type", "task type must be one of the fixed task types")
+    if task_type is not None and task_type not in PIPELINE_TASK_TYPES:
+        return _run_error(
+            "pipeline_task_type_unsupported",
+            "task type is not allowed to enter a pipeline",
+            taskType=task_type,
+        )
 
     lease_token: str | None = None
     lease_epoch: int | None = None
@@ -863,16 +999,49 @@ def run_pipeline(
         validation_error = _validate_registry(registry, skills_lookup)
         if validation_error:
             return _run_error("pipeline_registry_invalid", validation_error["message"])
+        if registry["version"] == 2:
+            if not _safe_identifier(pipeline_id):
+                return _run_error("invalid_pipeline_id", "pipeline id must use safe identifier syntax")
+            if pipeline_revision is not None and not _safe_identifier(pipeline_revision):
+                return _run_error("invalid_pipeline_revision", "pipeline revision must use safe identifier syntax")
 
-        selected = next((item for item in registry["pipelines"] if item["id"] == pipeline_id), None)
+        selected = next(
+            (
+                item
+                for item in registry["pipelines"]
+                if item["id"] == pipeline_id
+                and (pipeline_revision is None or item["revision"] == pipeline_revision)
+            ),
+            None,
+        )
         if selected is None:
+            if pipeline_revision is not None and any(item["id"] == pipeline_id for item in registry["pipelines"]):
+                return _run_error(
+                    "pipeline_revision_not_found",
+                    "pipeline revision does not exist",
+                    pipelineId=pipeline_id,
+                    pipelineRevision=pipeline_revision,
+                )
             return _run_error("pipeline_not_found", "pipeline does not exist")
         if not selected["enabled"]:
             return _run_error("pipeline_disabled", "pipeline is disabled")
+        if task_type is not None:
+            route = selected.get("route")
+            if not isinstance(route, dict) or task_type not in route["taskTypes"]:
+                return _run_error(
+                    "pipeline_task_type_mismatch",
+                    "pipeline route does not declare the requested task type",
+                    pipelineId=selected["id"],
+                    pipelineRevision=selected["revision"],
+                    taskType=task_type,
+                )
 
         if new_session_summary is not None:
             prepared = create_session(
-                home, summary=new_session_summary, task_type="pipeline", now_ns=_clock_value(now_ns)
+                home,
+                summary=new_session_summary,
+                task_type=task_type if task_type is not None else "pipeline",
+                now_ns=_clock_value(now_ns),
             )
         else:
             prepared = load_session(home, session_id or "")
@@ -880,6 +1049,14 @@ def run_pipeline(
             return prepared
         session = prepared["session"]
         active_session_id = session["id"]
+        if task_type is not None and session["task"]["type"] != task_type:
+            return _run_error(
+                "session_task_type_mismatch",
+                "session task type does not match requested task type",
+                sessionId=active_session_id,
+                expectedTaskType=task_type,
+                actualTaskType=session["task"]["type"],
+            )
         if session["status"] in TERMINAL_STATUSES:
             return _run_error("session_terminal", "terminal session cannot run a pipeline", sessionId=active_session_id)
 

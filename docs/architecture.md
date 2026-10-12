@@ -150,7 +150,10 @@ skills/MCP 尚未执行。
 约束：
 
 - 发现未带 `orchAgent-managed` 的同名字段必须拒绝覆盖。
-- 默认权限最小化：`read=allow`，`bash=deny`，`task=deny`。
+- 默认权限最小化：主 `orchAgent` 对 bash/task **默认 deny**，只精确允许
+  `orchagent pipeline route/run/advance`、`decision` 与 `orchagent-role-*`；pipeline 直达 agent 的 run
+  权限只 exact allow prompt 中固定 pipeline/revision 的 `direct-run` 完整命令（单 route type 时同时固定 task type），并只允许其管线使用的 role；
+  advance 因 session id 动态而单独允许；role subagent 禁止继续派发 task。
 - 若配置路径是 symlink，写真实目标文件，保留 symlink 本身。
 - rollback 必须恢复 symlink 形态和真实目标内容。
 

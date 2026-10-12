@@ -14,9 +14,28 @@ from .pipeline import load_pipeline_registry, _validate_registry
 MANAGED_KEY = "orchAgent"
 MANAGED_MARKER = "orchAgent-managed"
 
+CLASSIFY_QUESTIONS = (
+    '{"route":{"type":"choice","instructions":"这是什么类型的任务？","criteria":'
+    '{"bug":"修复已有功能的缺陷","feature":"新增功能或改变行为",'
+    '"ui_review":"现有 UI 与设计稿对齐","research":"调研/搜索/查资料",'
+    '"design":"界面视觉设计","qa":"纯问答/解释，无需改代码"}}}'
+)
+
 
 def agent_prompt(home: Path = DEFAULT_HOME) -> str:
-    return f"Load {home / 'orchAgent.yaml'}, then use its extension registries for hooks, skills, mcp, and knowledge. Do not use any existing orchestrator config."
+    return "\n".join(
+        [
+            f"读取 {home / 'orchAgent.yaml'}，只使用其中的 orchAgent 注册表。",
+            "收到原始任务后，先调用 subagent `decision`。state 必须逐字传入原始任务，不得概括；questions 必须逐字使用以下 classify JSON，不得自创问题：",
+            CLASSIFY_QUESTIONS,
+            "读取 decision 的 route 与 confidence：confidence >= 0.85 可继续；0.50 <= confidence < 0.85 可继续但必须标记 review=true；confidence < 0.50、provider error 或超时必须停止并 escalate/询问用户，不得调用 route/run。",
+            "只有 bug、feature、ui_review 进入 orchAgent pipeline；research、design、qa 交回宿主现有总路由处理。不得自行猜 task type，也不得让 Jev 选择 pipeline id 或 revision。",
+            "先执行 `orchagent pipeline route --task-type <type>`，只接受 status=ok，并读取 pipeline.id 与 pipeline.revision；no_match、conflict、unsupported 或其他错误必须 fail-closed。",
+            '再执行 `orchagent pipeline run --pipeline <id> --pipeline-revision <revision> --task-type <type> --new-session-summary "<任务摘要>"`，记住返回的 session id。',
+            "按每次 dispatch 返回的 role id 调用 `orchagent-role-<role-id>` subagent；根据当前门禁结果执行 `orchagent pipeline advance --session-id <id> --verdict pass|fail`，重复 dispatch 与 advance 直到 terminal。",
+            "禁止跳过 Jev/confidence gate、在 orchAgent 中存储 key/token/secret/env、跳过 gate，或自行改变回退目标。",
+        ]
+    )
 
 
 def candidate_config_paths() -> list[Path]:
@@ -168,8 +187,18 @@ def link(home: Path = DEFAULT_HOME) -> dict[str, Any]:
         "marker": MANAGED_MARKER,
         "permission": {
             "read": "allow",
-            "bash": "deny",
-            "task": "deny"
+            "edit": "deny",
+            "bash": {
+                "*": "deny",
+                "orchagent pipeline route *": "allow",
+                "orchagent pipeline run *": "allow",
+                "orchagent pipeline advance *": "allow",
+            },
+            "task": {
+                "*": "deny",
+                "decision": "allow",
+                "orchagent-role-*": "allow",
+            },
         }
     }
     data.setdefault(MANAGED_KEY, {})
@@ -238,15 +267,56 @@ def unlink(home: Path = DEFAULT_HOME) -> dict[str, Any]:
     return {"changed": changed}
 
 
-def _agent_permission() -> dict[str, str]:
-    """返回与现有 orchAgent 入口一致的最小权限。"""
-    return {"read": "allow", "bash": "deny", "task": "deny"}
+def _pipeline_agent_permission(pipeline: dict[str, Any]) -> dict[str, Any]:
+    """仅允许固定管线运行、推进，以及派发该管线实际引用的角色。"""
+    direct_run_command = _pipeline_direct_run_command(pipeline)
+    task: dict[str, str] = {"*": "deny"}
+    for role_id in dict.fromkeys(stage["role"] for stage in pipeline["stages"]):
+        task[f"orchagent-role-{role_id}"] = "allow"
+    return {
+        "read": "allow",
+        "edit": "deny",
+        "bash": {
+            "*": "deny",
+            direct_run_command: "allow",
+            "orchagent pipeline advance *": "allow",
+        },
+        "task": task,
+    }
+
+
+def _pipeline_direct_run_command(pipeline: dict[str, Any]) -> str:
+    task_types = pipeline.get("route", {}).get("taskTypes", [])
+    task_type_arg = f" --task-type {task_types[0]}" if len(task_types) == 1 else ""
+    return (
+        f"orchagent pipeline direct-run --pipeline {pipeline['id']} "
+        f"--pipeline-revision {pipeline['revision']}{task_type_arg}"
+    )
+
+
+def _role_prompt(role: dict[str, Any]) -> str:
+    description = role.get("description") or "执行注册表声明的角色职责"
+    return "\n".join(
+        [
+            f"角色职责：{role['id']}，{description}。",
+            "只处理主 agent 派发的当前 stage。",
+            "返回可用于当前门禁判定的结构化摘要。",
+            "不得自行推进 pipeline、调用 pipeline advance，或派发其他 agent。",
+        ]
+    )
 
 
 def _pipeline_prompt(pipeline: dict[str, Any], roles: dict[str, dict[str, Any]]) -> str:
     """根据 v2 管线生成可直接交给 opencode 的编排说明。"""
     pipeline_id = pipeline["id"]
-    lines = [f"你正在执行 orchAgent v2 管线 {pipeline_id}。", "", "阶段序列："]
+    revision = pipeline["revision"]
+    lines = [
+        f"你正在执行已固定的 orchAgent v2 管线 {pipeline_id} revision {revision}。",
+        "此直达入口不得调用 Jev、decision 或 pipeline route；管线与 revision 已固定。",
+        "多类型或无类型的直达入口不做语义分类，session 使用兼容类型 `pipeline`；如需 Jev 分类必须使用主 `orchAgent` 入口。",
+        "",
+        "阶段序列：",
+    ]
     for index, stage in enumerate(pipeline["stages"], 1):
         role = roles[stage["role"]]
         model = role.get("model") or "(默认模型)"
@@ -266,9 +336,10 @@ def _pipeline_prompt(pipeline: dict[str, Any], roles: dict[str, dict[str, Any]])
     lines.extend(
         [
             "",
-            f'开始：pipeline run --pipeline {pipeline_id} --new-session-summary "<任务>"',
+            f"开始：{_pipeline_direct_run_command(pipeline)}",
             "记住命令返回的 session id，并始终把它记在对话里。",
-            "每完成一个 stage 后调：pipeline advance --session-id <id> --verdict pass|fail",
+            "按 dispatch 返回的 role id 调用对应 `orchagent-role-<role-id>` subagent。",
+            "每完成一个 stage 后调：orchagent pipeline advance --session-id <id> --verdict pass|fail",
             "根据门禁结果沿对应边继续；不要跳过门禁或自行改变回退目标。",
         ]
     )
@@ -288,20 +359,56 @@ def sync_agents(home: Path = DEFAULT_HOME) -> dict[str, Any]:
         return {"status": "error", "error": "invalid_registry", "message": validation_error["message"]}
 
     roles = {role["id"]: role for role in registry["roles"]}
+    agent_sources: dict[str, list[dict[str, str]]] = {}
+    for role in registry["roles"]:
+        agent_sources.setdefault(f"orchagent-role-{role['id']}", []).append({"kind": "role", "id": role["id"]})
+    for pipeline in registry["pipelines"]:
+        if pipeline["enabled"]:
+            agent_sources.setdefault(f"orchagent-{pipeline['id']}", []).append({"kind": "pipeline", "id": pipeline["id"]})
+    for agent_id, sources in agent_sources.items():
+        if len(sources) > 1:
+            return {
+                "status": "error",
+                "error": "agent_id_conflict",
+                "message": f"multiple registry entries derive opencode agent.{agent_id}",
+                "agentId": agent_id,
+                "sources": sources,
+            }
+
     desired: dict[str, dict[str, Any]] = {}
+
+    def add_desired(agent_id: str, agent: dict[str, Any]) -> None:
+        if agent_id in desired:
+            raise AssertionError(f"duplicate desired agent id after conflict validation: {agent_id}")
+        desired[agent_id] = agent
+
+    for role in registry["roles"]:
+        description = f"orchAgent 角色：{role['id']}"
+        if isinstance(role.get("description"), str) and role["description"].strip():
+            description += f" {role['description']}"
+        agent: dict[str, Any] = {
+            "mode": "subagent",
+            "description": description,
+            "prompt": _role_prompt(role),
+            "marker": MANAGED_MARKER,
+            "permission": {"task": "deny"},
+        }
+        if role.get("model"):
+            agent["model"] = f"{role['provider']}/{role['model']}"
+        add_desired(f"orchagent-role-{role['id']}", agent)
     for pipeline in registry["pipelines"]:
         if not pipeline["enabled"]:
             continue
         description = f"orchAgent 管线：{pipeline['id']}"
         if isinstance(pipeline.get("description"), str) and pipeline["description"].strip():
             description += f" {pipeline['description']}"
-        desired[f"orchagent-{pipeline['id']}"] = {
+        add_desired(f"orchagent-{pipeline['id']}", {
             "mode": "primary",
             "description": description,
             "prompt": _pipeline_prompt(pipeline, roles),
             "marker": MANAGED_MARKER,
-            "permission": _agent_permission(),
-        }
+            "permission": _pipeline_agent_permission(pipeline),
+        })
 
     target = primary_config_path()
     data = read_json(target)

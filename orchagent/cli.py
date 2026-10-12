@@ -17,7 +17,7 @@ from .opencode import unlink as opencode_unlink
 from .opencode import sync_agents as opencode_sync_agents
 from .opencode import unlink_agents as opencode_unlink_agents
 from .paths import DEFAULT_HOME
-from .pipeline import doctor_pipelines, list_pipelines, list_roles, run_advance, run_pipeline
+from .pipeline import doctor_pipelines, list_pipelines, list_roles, route_pipeline, run_advance, run_pipeline
 from .skills import doctor_skills, list_skills
 
 
@@ -160,12 +160,31 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
         ok, result = doctor_pipelines(DEFAULT_HOME, skills_lookup)
         print_json(result)
         return 0 if ok else 1
+    if args.pipeline_cmd == "route":
+        result = route_pipeline(DEFAULT_HOME, args.task_type)
+        print_json(result)
+        return 0 if result.get("status") == "ok" else 1
     if args.pipeline_cmd == "run":
         result = run_pipeline(
             DEFAULT_HOME,
             args.pipeline,
+            pipeline_revision=args.pipeline_revision,
+            task_type=args.task_type,
             session_id=args.session_id,
             new_session_summary=args.new_session_summary,
+        )
+        print_json(result)
+        return 0 if result.get("status") == "ok" else 1
+    if args.pipeline_cmd == "direct-run":
+        summary = f"direct {args.pipeline}@{args.pipeline_revision}"
+        if args.task_type is not None:
+            summary = f"{summary} task:{args.task_type}"
+        result = run_pipeline(
+            DEFAULT_HOME,
+            args.pipeline,
+            pipeline_revision=args.pipeline_revision,
+            task_type=args.task_type,
+            new_session_summary=summary,
         )
         print_json(result)
         return 0 if result.get("status") == "ok" else 1
@@ -257,11 +276,19 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline_roles_sub.add_parser("doctor")
     pipeline_sub.add_parser("list")
     pipeline_sub.add_parser("doctor")
+    p_pipeline_route = pipeline_sub.add_parser("route")
+    p_pipeline_route.add_argument("--task-type", required=True)
     p_pipeline_run = pipeline_sub.add_parser("run")
     p_pipeline_run.add_argument("--pipeline", required=True)
+    p_pipeline_run.add_argument("--pipeline-revision")
+    p_pipeline_run.add_argument("--task-type")
     session_group = p_pipeline_run.add_mutually_exclusive_group(required=True)
     session_group.add_argument("--new-session-summary")
     session_group.add_argument("--session-id")
+    p_pipeline_direct_run = pipeline_sub.add_parser("direct-run")
+    p_pipeline_direct_run.add_argument("--pipeline", required=True)
+    p_pipeline_direct_run.add_argument("--pipeline-revision", required=True)
+    p_pipeline_direct_run.add_argument("--task-type")
     p_pipeline_advance = pipeline_sub.add_parser("advance")
     p_pipeline_advance.add_argument("--session-id", required=True)
     p_pipeline_advance.add_argument("--verdict", required=True, choices=["pass", "fail"])

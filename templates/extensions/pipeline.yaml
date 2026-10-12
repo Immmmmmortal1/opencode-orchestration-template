@@ -25,6 +25,10 @@
       "id": "bugfix",
       "revision": "1",
       "enabled": true,
+      "route": {
+        "taskTypes": ["bug"],
+        "priority": 10
+      },
       "entryStage": "investigate",
       "stages": [
         {

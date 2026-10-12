@@ -291,7 +291,7 @@ registry 会制造第二真相源。
   文档以 v2 为准、v1 标注为 legacy。
 - **runtime 标签按版本**：pipeline v1 → `builtinOnly`；v2 → `dispatchOnly`；不可载入 → `unknown`（见 D4）。
 - **opencode 集成**：新增 `opencode sync-agents`（按 v2 pipeline 生成/更新托管 agent 定义，
-  `agent.orchagent-<pipeline-id>`，带 `orchAgent-managed` marker）与 `opencode unlink --agents`
+  `agent.orchagent-<pipeline-id>` 与 `agent.orchagent-role-<role-id>`，带 `orchAgent-managed` marker）与 `opencode unlink --agents`
   （只删带 marker 者）。未托管同名 agent → **拒绝覆盖**（fail-closed）。
 - **pipeline registry 版本约束放宽为严格整数 `1|2`**；其余四类 extension（hooks / skills / mcp / knowledge）
   **仍严格要求 `1`**。
@@ -302,3 +302,22 @@ registry 会制造第二真相源。
 - advance 当前**只支持单 gate stage**；多 gate → `unsupported_multi_gate`（fail-closed，不猜测）。
 - 生成到宿主配置的内容**不含任何 key/token/secret**；写入前走既有备份机制（D7/D8）。
 - `opencode sync-agents` / `unlink --agents` **不碰宿主真实 skill / MCP 目录**，只管理 orchAgent 自己生成的 agent 条目。
+
+### D14.1 Jev 负责语义分类，orchAgent 负责确定性路由
+
+用户已确认（2026-10-12）。路由采用**宿主语义分类 + CLI 确定性选择**两层模型：
+
+- 主 `agent.orchAgent` 通过宿主 `decision` subagent 调 Jev 的固定 `classify` 模板；Jev 只输出
+  task type + confidence，**不得选择 pipeline id/revision**；
+- confidence `>=0.85` 直接采用，`0.50~0.85` 标记 review，`<0.50` / error / timeout 必须 escalate；
+- orchAgent CLI 不调用 Jev、不引入 provider SDK、不碰 key，只用显式 task type 执行
+  `pipeline route` 的精确匹配、priority 裁决与冲突报错；
+- v2 pipeline 可选声明 `route:{taskTypes,priority}`；不提供 default pipeline；unknown/no-match/conflict
+  均 fail-closed；
+- route task type 仅允许 `bug|feature|ui_review`；v2 标识符使用宿主安全语法；run 必须再次验证
+  task type 属于选中 revision 的 route；派生宿主 agent ID 冲突必须在写配置前 fail-closed；
+- route 只选择、不建 session；输出的 id+revision 必须经 `pipeline run --pipeline-revision` 固定后执行；
+- `opencode link` 对主 agent 仅精确允许 `decision` / `orchagent-role-*` 与 pipeline CLI；
+  `sync-agents` 生成 role subagents 和 pipeline 直达 agents，后者不重复调用 Jev。
+
+规范与错误语义以 [`pipeline.md`](pipeline.md) §8 为唯一来源。

@@ -376,8 +376,8 @@ ORCHAGENT_HOME="$tmp/home" OPENCODE_CONFIG="$tmp/oc.json" ./bin/orchagent pipeli
 | `tests/test_pipeline.py` | pipeline registry 结构与引用 fail-closed（未知字段/版本/重复 id/entryStage/edge 完整性/maxAttempts）；`stage.skill` 与 `gate.evaluator` 未注册、**disabled**、非 builtin、catalog 无实现；runner 成功路径、`gate_rejected`、**回退 + attempts 用尽**、**同 stage 多 gate 整体失效**、多 gate 全通过的推进解释；稳定键（stage_key/gate_key）字段齐全；终止决策表 6 行 + timeout 输入；引用非法 skill 时**无 session 副作用**；active lease 不被抢占；lease 在终止时释放 |
 | `tests/test_builtin_skills.py` | 两个 fixture builtin skill（`emit-json` / `assert-json-path-equals`）的成功与错误路径；JSONPath-lite 边界（不支持数组下标/通配） |
 | `tests/test_session_lock_lease.py` | 新增 `finalize_session` 语义（写终态 + 释放 lease、过期/重复拒绝）与 `terminal_status_path`（走合法路径到达终态） |
-| `tests/test_pipeline_v2.py` | v2 registry 严格性（未知字段/版本/重复 role id/凭证字段 `api_key`/`key`/`token`/`secret`/`env` 拒收/`stage.role` 引用缺失→fail-closed/v2 出现 `skill` 与 v1 出现 `roles` 均 fail-closed）；`pipeline roles list\|doctor`；`pipeline run` dispatch 输出（stage/role/sessionId）；`pipeline advance` 推进 / 回退 / 终止（`succeeded` / `gate_rejected` / `attempts_exhausted`）/`invalid_verdict`/`session_terminal`/`unsupported_multi_gate`；run `sequence` 取最新；advance 后 lease 已释放；v1 行为不变 |
-| `tests/test_opencode_agents.py` | `opencode sync-agents` 生成托管 agent（`orchAgent-managed` marker / description / prompt 含阶段序列与 `pipeline advance` 指令 / **无 key 泄漏**）；幂等 no-op；未托管同名冲突 fail-closed（不覆盖）；v1 registry → `unsupported`；`unlink --agents` 只删带 marker 者 |
+| `tests/test_pipeline_v2.py` | v2 registry 严格性（含固定 `route.taskTypes` 子集、priority、v2 安全标识符）；精确 task type 路由、priority 稳定裁决、同优先级 conflict、unknown no-match、非 pipeline 类型拒绝、v1 unsupported、route 零 session/lease 副作用；revision-pinned run、route→run 类型匹配、session task type 一致性；v1 特殊字符标识符兼容；`pipeline roles list\|doctor`；dispatch/advance 与 v1 行为不变 |
+| `tests/test_opencode_agents.py` | `opencode sync-agents` 生成 pipeline primary + `orchagent-role-*` subagents（marker/model/prompt/最小 task 权限/**无 key 泄漏**）；pipeline 直达 prompt 与 bash 权限逐字固定 exact `direct-run` 完整命令（单类型同时固定 task type、无 summary/通配符），主入口仍 route→run，且不调用 Jev；其他 pipeline/revision、追加参数/命令/空格不匹配；派生 agent ID 冲突 fail-closed 且零配置/备份副作用；幂等 no-op；未托管 pipeline/role 冲突 fail-closed；删除 role/禁用 pipeline 后清理旧托管 agent；v1 unsupported；`unlink --agents` 只删带 marker 者 |
 
 验证结果：以当前 `python3 -m unittest discover -s tests` 的实际输出为准，不在文档中写死用例数。
 
@@ -385,6 +385,24 @@ ORCHAGENT_HOME="$tmp/home" OPENCODE_CONFIG="$tmp/oc.json" ./bin/orchagent pipeli
 
 - `extensions` 由四类扩为**五类**（新增 `pipeline`）；旧 home 缺 `extensions.pipeline` 时 `config validate` 报缺项，需 `install --force` 或手动补。
 - skill 条目新增 **`backend` 必填**字段，3A 合法值**仅 `builtin`**（`agent` 子期见 [`capability-seams.md`](capability-seams.md) §9.1）。
+- v2 pipeline 可选新增 `route:{taskTypes,priority}`；旧 v2 registry 仍可显式 run，但不会被 route 选中。
+- Jev 路由升级已有安装：`install --force` → `opencode link` → `opencode sync-agents` → 重启 opencode。
+
+### Phase 3C 路由手工验证
+
+```bash
+tmp="$(mktemp -d)"
+export ORCHAGENT_HOME="$tmp/home" OPENCODE_CONFIG="$tmp/opencode.json" HOME="$tmp/fake-home"
+mkdir -p "$HOME"
+./bin/orchagent install --force
+./bin/orchagent opencode link
+./bin/orchagent opencode sync-agents
+./bin/orchagent pipeline route --task-type bug
+./bin/orchagent pipeline run --pipeline bugfix --pipeline-revision 1 --task-type bug --new-session-summary "fix login bug"
+```
+
+必须同时验证 unknown/no-match、同最低 priority conflict、v1 unsupported、严格 task type、route 前后
+session/lease 文件数量不变，以及生成的主 agent/role agent 权限与 classify/confidence prompt。
 
 ## Phase 3B-0：Capability Seam 设计 + 文档落地
 

@@ -220,14 +220,16 @@ orchagent skills list|doctor
 
 ## Phase 3C：路由 + 第一条真实流水线
 
-状态：未开始。
+状态：**已完成**。v2 `bugfix` 已端到端验证；Jev 宿主分类 + 确定性 pipeline 路由已实现。
 
 目标：
 
-- 按任务类型路由到不同 pipeline；
+- 宿主 `decision`（Jev）按固定 classify 契约判定 task type；orchAgent 按显式 task type
+  确定性路由到 pipeline id+revision；
 - 以 **bug 修复**为第一条端到端流水线。
 
-验收：用真实流水线检验模型；据此判断是否需要抽象（**不早于 3 条流水线**）。
+验收：默认 `bug` → `bugfix`；未知类型/同优先级冲突/低 confidence 均 fail-closed；route 无 session/lease
+副作用；run 固定 revision。继续据此判断是否需要抽象（**不早于 3 条流水线**）。
 
 > 非目标见 [`architecture.md`](architecture.md) §7/§7.1 与 [`pipeline.md`](pipeline.md) §11：
 > 通用 workflow DSL、动态调度、后台 daemon、绕过 skill 的自由发挥（含把自由逻辑包装成 Gate）。

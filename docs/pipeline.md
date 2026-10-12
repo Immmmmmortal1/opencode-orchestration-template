@@ -107,7 +107,9 @@ v2 的核心：**orchAgent 只做编排与派发，不执行、不调 LLM、不�
     { "id": "investigator", "provider": "deepseek", "model": "deepseek-v4-flash", "description": "..." }
   ],
   "pipelines": [
-    { "id": "bugfix", "revision": "1", "enabled": true, "entryStage": "investigate",
+    { "id": "bugfix", "revision": "1", "enabled": true,
+      "route": { "taskTypes": ["bug"], "priority": 10 },
+      "entryStage": "investigate",
       "stages": [ { "id": "investigate", "role": "investigator", "maxAttempts": 2,
                     "gates": ["gate-investigate-evidence"] } ],
       "gates": [ { "id": "gate-investigate-evidence", "stage": "investigate",
@@ -144,9 +146,11 @@ v2 的核心：**orchAgent 只做编排与派发，不执行、不调 LLM、不�
 宿主按自己的 agent `model` 配置真正发起调用。role → provider 的绑定**可换**（改 registry 的 `roles[]`），
 `pipelines[]` 一个字不改。
 
-**接入宿主（opencode）**：`orchagent opencode sync-agents` 按 v2 pipeline 生成/更新托管 agent 定义
-（`agent.orchagent-<pipeline-id>`，带 `orchAgent-managed` marker，`prompt` 内嵌阶段序列、门禁与回退边、
-以及 `run`/`advance` 的调用说明）；`orchagent opencode unlink --agents` 只删带 marker 者。
+**接入宿主（opencode）**：`orchagent opencode sync-agents` 按 v2 registry 生成/更新两类托管定义：
+`agent.orchagent-<pipeline-id>`（管线直达 primary agent）与 `agent.orchagent-role-<role-id>`
+（真正由宿主调用的 role subagent）。两者都带 `orchAgent-managed` marker；pipeline prompt 内嵌阶段序列、
+门禁、回退边与 revision-pinned `direct-run`/`advance` 调用说明。`orchagent opencode unlink --agents`
+只删带 marker 者。
 **未托管同名 agent → 拒绝覆盖**（fail-closed）。生成的 agent 定义**不含任何凭证**。
 
 ## 3. 硬约束
@@ -407,15 +411,97 @@ runner 在 stage/gate 边界续约失败属于失权事件，不再进入回退�
 
 「路由」= **按任务类型选择哪条流水线**（bug / feature / ui_review / …）。
 
-注意：路由是**静态选择**，不是动态调度（第 9 节）。
+注意：路由是**静态选择**，不是动态调度（第 9 节）。路由分成两层，职责不得混合：
 
-**选择协议（3C 验收项，必须定义，不得只写概念）**：
+1. **宿主语义分类**：主 `agent.orchAgent` 调用宿主 `decision` subagent；该 subagent 直接绑定 Jev，
+   使用固定 `classify` 问题把原始任务分类为
+   `bug | feature | ui_review | research | design | qa`，并返回 confidence。
+2. **orchAgent 确定性选择**：只有 `bug | feature | ui_review` 进入
+   `pipeline route --task-type <type>`；orchAgent 只接收**显式 task type**，不读自然语言、不调用 Jev、
+   不碰 provider/API key。`research | design | qa` 交回宿主原有总路由。
 
-- **任务类型来源**：由谁判定（用户显式指定 / 显式入参），不做隐式猜测；
-- **多规则匹配**：多条规则同时命中时如何裁决（如优先级 + 显式报错，禁止"随机取第一条"）；
-- **未知类型**：无匹配 pipeline → **fail-closed**（明确报错），不得静默选默认；
-- **默认 pipeline**：是否提供，以及何时使用（若提供必须显式声明）；
-- **版本固定**：选中后固定 `pipeline_revision`，运行期间不因定义变更而漂移（见 5.1）。
+### 8.1 Jev confidence 门
+
+- `confidence >= 0.85`：采用分类；
+- `0.50 <= confidence < 0.85`：可采用，但宿主必须标记 `review=true`；
+- `confidence < 0.50`、provider error 或 timeout：**停止**，`escalate` / 询问用户；禁止调用 route/run；
+- Jev **只判 task type**，不得选择 pipeline id、revision、回退边或门禁结果。
+
+Jev 调用完全属于宿主：`agent.orchAgent → task decision → openrouter-jev provider → Jev`。
+orchAgent CLI/registry 不含 Jev SDK、endpoint 或凭证。
+
+### 8.2 Registry 路由声明（v2 only）
+
+```json
+"route": {
+  "taskTypes": ["bug"],
+  "priority": 10
+}
+```
+
+- `route` 是 v2 `pipelines[]` 的**可选**字段；v1 出现 `route` → unknown-field fail-closed；
+- `taskTypes` 必须是非空、无重复的数组，且值只能是 `bug | feature | ui_review`；
+  `research | design | qa` 属于宿主总路由，禁止写入 pipeline route。匹配**严格精确**，不 trim、不 lowercase、不做别名推断；
+- `priority` 必须是非负严格整数（拒绝 bool/float/string）；数值越小优先级越高；
+- v2 的 role/pipeline/stage/gate id 与 pipeline revision 必须符合
+  `[A-Za-z0-9][A-Za-z0-9._-]*`，避免宿主 agent ID、权限 glob 与命令参数注入；v1 保持旧兼容语义；
+- disabled pipeline 与无 `route` pipeline 均不参与选择，但仍可按既有显式规则处理；
+- **不提供 default pipeline**。未给/未知 task type 均 fail-closed，禁止静默兜底。
+
+### 8.3 选择与冲突协议
+
+`pipeline route --task-type <type>` 是**纯选择**：不创建 session、不拿 lease、不 dispatch。
+
+- 无候选 → `pipeline_route_no_match`；
+- 多候选 → 取最低 `priority`；
+- 最低 priority 仍并列 → `pipeline_route_conflict`，候选按 `(id, revision)` 稳定排序；
+- v1 registry → `pipeline_route_unsupported`；
+- 成功结果固定输出 pipeline `id + revision` 及后续 run 参数；禁止依赖 registry 数组顺序。
+
+```json
+{
+  "status": "ok",
+  "mode": "route",
+  "taskType": "bug",
+  "pipeline": {"id": "bugfix", "revision": "1"},
+  "priority": 10,
+  "run": {"pipeline": "bugfix", "pipelineRevision": "1", "taskType": "bug"}
+}
+```
+
+### 8.4 Revision 固定与 session
+
+宿主必须把 route 输出原样交给：
+
+```bash
+orchagent pipeline run \
+  --pipeline bugfix \
+  --pipeline-revision 1 \
+  --task-type bug \
+  --new-session-summary "<任务摘要>"
+```
+
+- `pipeline run` **永远不做路由**；`--pipeline` 仍显式必填；
+- 给了 `--pipeline-revision` 就必须按 id+revision 精确匹配；不存在 → `pipeline_revision_not_found`，
+  不得漂移到当前 revision；未给 revision 时保持 v0.10.0 兼容行为；
+- 新 session 把显式 task type 写入 `session.task.type`；未给时保持兼容值 `pipeline`；
+- 显式 task type 必须属于固定 pipeline 子集，且必须出现在选中 revision 的 `route.taskTypes`；
+  无 route 或不匹配 → `pipeline_task_type_mismatch`，并在创建 session 前停止；
+- 复用 session 时，显式 task type 必须与已存值完全一致，否则 `session_task_type_mismatch`；
+- route 自身没有 session/lease/config 写副作用。
+
+### 8.5 宿主 Agent 与权限
+
+- `orchagent opencode link` 管理主 `agent.orchAgent`：只允许调用 `decision`、`orchagent-role-*`，
+  以及 `orchagent pipeline route/run/advance`；其余 task/bash 默认 deny；
+- `opencode sync-agents` 生成 `orchagent-role-*` 与 pipeline 直达 agents。role agent 不能继续派发 subagent；
+  pipeline 直达 agent 已固定 pipeline/revision，**不再调用 Jev/route**；其 bash 只 exact allow 与 prompt
+  逐字一致的 `direct-run` 完整命令（单 route type 时也固定 task type），不允许 `pipeline run`；
+- role/pipeline 派生出的宿主 agent ID 必须全局唯一；如 role `fixer` 与 pipeline `role-fixer`
+  同时映射为 `orchagent-role-fixer`，`sync-agents` 返回 `agent_id_conflict`，且不写配置、不建备份；
+- opencode 权限匹配按 last-match-wins：广泛 deny 必须写在精确 allow 之前；
+- 升级已有安装须依次执行 `install --force`、`opencode link`、`opencode sync-agents`，
+  然后**重启 opencode**使配置生效。
 
 ## 9. 与 architecture §7 非目标的关系（重要）
 
@@ -459,7 +545,7 @@ runner 在 stage/gate 边界续约失败属于失权事件，不再进入回退�
 不做完整 I/O schema 接线；无后台 daemon、无动态调度。
 
 **3A 明确不做**：agent 后端（3B-6，未排期）、完整 I/O schema 与接线（3B-4，未实现）（子期见 [`capability-seams.md`](capability-seams.md) §9.1）、
-路由选择（3C）、真实流水线（3C）。
+路由选择（3C）、真实流水线（3C）——二者后来已在 3C 实现，见 §8 与 §10 状态表。
 
 ### 10.2 3A 引入的契约变更（升级影响）
 

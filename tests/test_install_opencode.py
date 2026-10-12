@@ -286,6 +286,28 @@ class OpenCodeTests(unittest.TestCase):
         self.assertEqual(0, code)
         self.assertTrue(payload["opencode"]["linked"])
 
+    def test_link_generates_decision_routing_prompt_and_minimum_permissions(self) -> None:
+        self.assertEqual(0, self.env.run_cli("opencode", "link")[0])
+        data = json.loads(self.env.opencode_config.read_text(encoding="utf-8"))
+        agent = data["agent"]["orchAgent"]
+        prompt = agent["prompt"]
+        for expected in (
+            "decision", "state 必须逐字", '"route":{"type":"choice"',
+            "confidence >= 0.85", "0.50 <= confidence < 0.85", "confidence < 0.50",
+            "pipeline route --task-type", "pipeline.revision", "--pipeline-revision",
+            "pipeline advance", "orchagent-role-<role-id>",
+        ):
+            self.assertIn(expected, prompt)
+        permission = agent["permission"]
+        self.assertEqual("deny", permission["edit"])
+        self.assertEqual(
+            ["*", "orchagent pipeline route *", "orchagent pipeline run *", "orchagent pipeline advance *"],
+            list(permission["bash"]),
+        )
+        self.assertEqual(["*", "decision", "orchagent-role-*"], list(permission["task"]))
+        self.assertEqual("deny", permission["bash"]["*"])
+        self.assertEqual("allow", permission["task"]["decision"])
+
     def test_opencode_config_env_strictly_isolates_default_configs(self) -> None:
         default_config = self.env.fake_home / ".config" / "opencode" / "opencode.json"
         local_config = self.env.fake_home / ".config" / "opencode.local.json"

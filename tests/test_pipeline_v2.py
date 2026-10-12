@@ -7,8 +7,16 @@ from unittest.mock import patch
 from typing import Any
 
 from orchagent.config import validate_extension_registry
-from orchagent.pipeline import doctor_pipelines, list_pipelines, list_roles, run_advance, run_pipeline
+from orchagent.pipeline import (
+    doctor_pipelines,
+    list_pipelines,
+    list_roles,
+    route_pipeline,
+    run_advance,
+    run_pipeline,
+)
 from orchagent.session import create_session, load_session, lease_path
+from orchagent.skills import list_skills
 from tests.helpers import IsolatedEnv
 
 
@@ -29,6 +37,12 @@ def role_registry() -> dict[str, Any]:
             ],
         }],
     }
+
+
+def routed_registry() -> dict[str, Any]:
+    data = role_registry()
+    data["pipelines"][0]["route"] = {"taskTypes": ["bug"], "priority": 10}
+    return data
 
 
 def advance_registry() -> dict[str, Any]:
@@ -133,6 +147,148 @@ class PipelineV2Tests(unittest.TestCase):
         self.assertEqual("bugfix", listed["pipelines"][0]["id"])
         self.assertTrue(doctor_pipelines(self.env.home, {})[0])
 
+    def test_route_schema_is_v2_only_and_rejects_unknown_fields(self) -> None:
+        self.env.write_registry("pipeline", routed_registry())
+        self.assertEqual("ok", list_pipelines(self.env.home)["status"])
+
+        data = role_registry()
+        data["version"] = 1
+        data.pop("roles")
+        data["pipelines"][0]["route"] = {"taskTypes": ["bug"], "priority": 0}
+        self.assert_error(data, "unknown fields")
+
+        for field in ("extra", "default"):
+            data = routed_registry()
+            data["pipelines"][0]["route"][field] = True
+            self.assert_error(data, "unknown fields")
+
+    def test_route_schema_rejects_invalid_task_types_and_priority(self) -> None:
+        invalid_task_types = (
+            None,
+            "bug",
+            [],
+            [""],
+            [1],
+            [True],
+            ["bug", "bug"],
+            [" bug "],
+            ["unknown"],
+            ["research"],
+            ["design"],
+            ["qa"],
+        )
+        for value in invalid_task_types:
+            with self.subTest(taskTypes=value):
+                data = routed_registry()
+                data["pipelines"][0]["route"]["taskTypes"] = value
+                self.assert_error(data)
+
+        for value in (True, 1.0, "1", -1):
+            with self.subTest(priority=value):
+                data = routed_registry()
+                data["pipelines"][0]["route"]["priority"] = value
+                self.assert_error(data)
+
+    def test_route_selects_enabled_routed_candidate_only(self) -> None:
+        data = routed_registry()
+        disabled = copy.deepcopy(data["pipelines"][0])
+        disabled.update(id="disabled", enabled=False, revision="2")
+        unrouted = copy.deepcopy(data["pipelines"][0])
+        unrouted.update(id="unrouted", revision="3")
+        unrouted.pop("route")
+        data["pipelines"].extend([disabled, unrouted])
+        self.env.write_registry("pipeline", data)
+
+        result = route_pipeline(self.env.home, "bug")
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual({"id": "bugfix", "revision": "1"}, result["pipeline"])
+        self.assertEqual(
+            {"pipeline": "bugfix", "pipelineRevision": "1", "taskType": "bug"},
+            result["run"],
+        )
+
+    def test_route_priority_is_order_independent(self) -> None:
+        data = routed_registry()
+        lower = copy.deepcopy(data["pipelines"][0])
+        lower.update(id="preferred", revision="2")
+        lower["route"] = {"taskTypes": ["bug"], "priority": 1}
+        data["pipelines"].append(lower)
+        for pipelines in (data["pipelines"], list(reversed(data["pipelines"]))):
+            candidate = copy.deepcopy(data)
+            candidate["pipelines"] = pipelines
+            self.env.write_registry("pipeline", candidate)
+            result = route_pipeline(self.env.home, "bug")
+            self.assertEqual({"id": "preferred", "revision": "2"}, result["pipeline"])
+
+    def test_route_conflict_candidates_are_sorted(self) -> None:
+        data = routed_registry()
+        data["pipelines"][0].update(id="zeta", revision="2")
+        tied = copy.deepcopy(data["pipelines"][0])
+        tied.update(id="alpha", revision="3")
+        data["pipelines"].append(tied)
+        self.env.write_registry("pipeline", data)
+
+        result = route_pipeline(self.env.home, "bug")
+
+        self.assertEqual("pipeline_route_conflict", result["error"])
+        self.assertEqual(
+            [
+                {"id": "alpha", "revision": "3", "priority": 10},
+                {"id": "zeta", "revision": "2", "priority": 10},
+            ],
+            result["candidates"],
+        )
+
+    def test_route_no_match_is_exact_and_has_no_session_or_lease_side_effect(self) -> None:
+        self.env.write_registry("pipeline", routed_registry())
+        sessions = self.env.home / "sessions"
+        leases = self.env.home / "leases"
+        before = (set(sessions.iterdir()), set(leases.iterdir()))
+
+        result = route_pipeline(self.env.home, "feature")
+        self.assertEqual("pipeline_route_no_match", result["error"])
+
+        for task_type in ("unknown", "Bug", " bug ", ""):
+            self.assertEqual("invalid_task_type", route_pipeline(self.env.home, task_type)["error"])
+        for task_type in ("research", "design", "qa"):
+            self.assertEqual(
+                "pipeline_task_type_unsupported",
+                route_pipeline(self.env.home, task_type)["error"],
+            )
+
+        self.assertEqual(before, (set(sessions.iterdir()), set(leases.iterdir())))
+
+    def test_v1_route_is_unsupported(self) -> None:
+        self.env.write_registry("pipeline", {"version": 1, "pipelines": []})
+        result = route_pipeline(self.env.home, "bug")
+        self.assertEqual("unsupported", result["status"])
+        self.assertEqual("pipeline_route_unsupported", result["error"])
+
+    def test_cli_route_exit_codes_and_json(self) -> None:
+        self.env.write_registry("pipeline", routed_registry())
+        code, payload, _, stderr = self.env.run_cli("pipeline", "route", "--task-type", "bug")
+        self.assertEqual(0, code, stderr)
+        self.assertEqual("1", payload["pipeline"]["revision"])
+
+        code, payload, _, stderr = self.env.run_cli("pipeline", "route", "--task-type", "unknown")
+        self.assertEqual(1, code, stderr)
+        self.assertEqual("invalid_task_type", payload["error"])
+
+    def test_registry_identifiers_and_revision_use_safe_syntax(self) -> None:
+        mutations = (
+            lambda data: data["roles"][0].update(id="investigator*"),
+            lambda data: data["pipelines"][0].update(id="bug fix"),
+            lambda data: data["pipelines"][0].update(revision="1;next"),
+            lambda data: data["pipelines"][0]["stages"][0].update(id="s*1"),
+            lambda data: data["pipelines"][0]["gates"][0].update(id="gate one"),
+        )
+        for mutate in mutations:
+            with self.subTest(mutate=mutate):
+                data = role_registry()
+                mutate(data)
+                self.assert_error(data, "safe identifier syntax")
+
     def test_version_is_strict_and_v1_roles_are_rejected(self) -> None:
         for version in (2.0, True, "2"):
             data = role_registry()
@@ -212,6 +368,193 @@ class PipelineV2Tests(unittest.TestCase):
         self.assertEqual("deepseek-v4-flash", result["role"]["model"])
         self.assertIn("investigator", result["message"])
         self.assertFalse(lease_path(self.env.home, result["sessionId"]).exists())
+
+    def test_revision_pinned_run_and_task_type_persistence(self) -> None:
+        self.env.write_registry("pipeline", routed_registry())
+
+        result = run_pipeline(
+            self.env.home,
+            "bugfix",
+            pipeline_revision="1",
+            task_type="bug",
+            new_session_summary="revision pinned",
+        )
+
+        self.assertEqual("dispatch", result["mode"])
+        self.assertEqual("1", result["pipeline"]["revision"])
+        persisted = load_session(self.env.home, result["sessionId"])["session"]
+        self.assertEqual("bug", persisted["task"]["type"])
+
+        spaced = run_pipeline(
+            self.env.home,
+            "bugfix",
+            pipeline_revision="1",
+            task_type=" bug ",
+            new_session_summary="raw task type",
+        )
+        self.assertEqual("invalid_task_type", spaced["error"])
+
+        legacy_session = create_session(
+            self.env.home,
+            summary="legacy normalization",
+            task_type=" bug ",
+        )["session"]
+        self.assertEqual("bug", legacy_session["task"]["type"])
+
+    def test_missing_revision_fails_without_creating_session(self) -> None:
+        self.env.write_registry("pipeline", routed_registry())
+        before = set((self.env.home / "sessions").iterdir())
+
+        result = run_pipeline(
+            self.env.home,
+            "bugfix",
+            pipeline_revision="missing",
+            task_type="bug",
+            new_session_summary="must not create",
+        )
+
+        self.assertEqual("pipeline_revision_not_found", result["error"])
+        self.assertEqual(before, set((self.env.home / "sessions").iterdir()))
+
+    def test_run_task_type_mismatch_has_no_session_or_lease_side_effect(self) -> None:
+        self.env.write_registry("pipeline", routed_registry())
+        sessions = self.env.home / "sessions"
+        leases = self.env.home / "leases"
+        before = (set(sessions.iterdir()), set(leases.iterdir()))
+
+        result = run_pipeline(
+            self.env.home,
+            "bugfix",
+            pipeline_revision="1",
+            task_type="feature",
+            new_session_summary="must not create",
+        )
+
+        self.assertEqual("pipeline_task_type_mismatch", result["error"])
+        self.assertEqual(before, (set(sessions.iterdir()), set(leases.iterdir())))
+
+    def test_run_rejects_fixed_non_pipeline_task_types(self) -> None:
+        self.env.write_registry("pipeline", routed_registry())
+        for task_type in ("research", "design", "qa"):
+            with self.subTest(task_type=task_type):
+                result = run_pipeline(
+                    self.env.home,
+                    "bugfix",
+                    task_type=task_type,
+                    new_session_summary="unsupported task type",
+                )
+                self.assertEqual("pipeline_task_type_unsupported", result["error"])
+
+    def test_run_with_task_type_requires_declared_route(self) -> None:
+        self.env.write_registry("pipeline", role_registry())
+
+        result = run_pipeline(
+            self.env.home,
+            "bugfix",
+            task_type="bug",
+            new_session_summary="route required",
+        )
+
+        self.assertEqual("pipeline_task_type_mismatch", result["error"])
+        self.assertEqual([], list((self.env.home / "sessions").iterdir()))
+        self.assertEqual([], list((self.env.home / "leases").iterdir()))
+
+    def test_run_without_task_type_preserves_pipeline_default(self) -> None:
+        self.env.write_registry("pipeline", role_registry())
+        result = run_pipeline(self.env.home, "bugfix", new_session_summary="default task")
+        persisted = load_session(self.env.home, result["sessionId"])["session"]
+        self.assertEqual("pipeline", persisted["task"]["type"])
+
+    def test_existing_session_task_type_mismatch_fails_closed(self) -> None:
+        self.env.write_registry("pipeline", routed_registry())
+        session = create_session(self.env.home, summary="existing", task_type="feature")["session"]
+
+        result = run_pipeline(self.env.home, "bugfix", session_id=session["id"], task_type="bug")
+
+        self.assertEqual("session_task_type_mismatch", result["error"])
+        self.assertFalse(lease_path(self.env.home, session["id"]).exists())
+
+    def test_cli_run_accepts_revision_and_task_type(self) -> None:
+        self.env.write_registry("pipeline", routed_registry())
+        code, payload, _, stderr = self.env.run_cli(
+            "pipeline", "run",
+            "--pipeline", "bugfix",
+            "--pipeline-revision", "1",
+            "--task-type", "bug",
+            "--new-session-summary", "cli route run",
+        )
+        self.assertEqual(0, code, stderr)
+        persisted = load_session(self.env.home, payload["sessionId"])["session"]
+        self.assertEqual("bug", persisted["task"]["type"])
+
+    def test_cli_direct_run_dispatches_new_bug_session(self) -> None:
+        self.env.write_registry("pipeline", routed_registry())
+
+        code, payload, _, stderr = self.env.run_cli(
+            "pipeline", "direct-run",
+            "--pipeline", "bugfix",
+            "--pipeline-revision", "1",
+            "--task-type", "bug",
+        )
+
+        self.assertEqual(0, code, stderr)
+        self.assertEqual("dispatch", payload["mode"])
+        persisted = load_session(self.env.home, payload["sessionId"])["session"]
+        self.assertEqual("bug", persisted["task"]["type"])
+        self.assertEqual("direct bugfix@1 task:bug", persisted["task"]["summary"])
+
+    def test_cli_direct_run_without_task_type_uses_pipeline_default(self) -> None:
+        self.env.write_registry("pipeline", role_registry())
+
+        code, payload, _, stderr = self.env.run_cli(
+            "pipeline", "direct-run",
+            "--pipeline", "bugfix",
+            "--pipeline-revision", "1",
+        )
+
+        self.assertEqual(0, code, stderr)
+        persisted = load_session(self.env.home, payload["sessionId"])["session"]
+        self.assertEqual("pipeline", persisted["task"]["type"])
+        self.assertEqual("direct bugfix@1", persisted["task"]["summary"])
+
+    def test_cli_direct_run_preserves_revision_and_route_errors(self) -> None:
+        self.env.write_registry("pipeline", routed_registry())
+
+        code, payload, _, stderr = self.env.run_cli(
+            "pipeline", "direct-run",
+            "--pipeline", "bugfix",
+            "--pipeline-revision", "missing",
+            "--task-type", "bug",
+        )
+        self.assertEqual(1, code, stderr)
+        self.assertEqual("pipeline_revision_not_found", payload["error"])
+
+        code, payload, _, stderr = self.env.run_cli(
+            "pipeline", "direct-run",
+            "--pipeline", "bugfix",
+            "--pipeline-revision", "1",
+            "--task-type", "feature",
+        )
+        self.assertEqual(1, code, stderr)
+        self.assertEqual("pipeline_task_type_mismatch", payload["error"])
+
+    def test_cli_direct_run_rejects_free_and_session_arguments(self) -> None:
+        self.env.write_registry("pipeline", routed_registry())
+        base = (
+            "pipeline", "direct-run",
+            "--pipeline", "bugfix",
+            "--pipeline-revision", "1",
+        )
+        rejected_arguments = (
+            ("unexpected",),
+            ("--new-session-summary", "free text"),
+            ("--new-session-summary", "first", "--new-session-summary", "second"),
+        )
+
+        for extra in rejected_arguments:
+            with self.subTest(extra=extra):
+                code, _, _, _ = self.env.run_cli(*base, *extra)
+                self.assertNotEqual(0, code)
 
     def test_v2_dispatch_with_existing_session(self) -> None:
         self.env.write_registry("pipeline", role_registry())
@@ -383,19 +726,29 @@ class PipelineV2Tests(unittest.TestCase):
         registry = {
             "version": 1,
             "pipelines": [{
-                "id": "fixture", "revision": "1", "enabled": True, "entryStage": "s1",
-                "stages": [{"id": "s1", "skill": "orchagent.pipeline.emit-json", "maxAttempts": 1, "params": {"value": {"ok": True}}, "gates": ["g1"]}],
-                "gates": [{"id": "g1", "stage": "s1", "evaluator": "orchagent.pipeline.assert-json-path-equals", "params": {"path": "$.value.ok", "equals": True}}],
+                "id": "legacy fixture", "revision": "rev 1", "enabled": True, "entryStage": "stage one",
+                "stages": [{"id": "stage one", "skill": "orchagent.pipeline.emit-json", "maxAttempts": 1, "params": {"value": {"ok": True}}, "gates": ["gate one"]}],
+                "gates": [{"id": "gate one", "stage": "stage one", "evaluator": "orchagent.pipeline.assert-json-path-equals", "params": {"path": "$.value.ok", "equals": True}}],
                 "edges": [
-                    {"from": {"stage": "s1", "gate": "g1", "verdict": "pass"}, "to": {"terminal": "succeeded"}},
-                    {"from": {"stage": "s1", "gate": "g1", "verdict": "fail"}, "to": {"stage": None}},
+                    {"from": {"stage": "stage one", "gate": "gate one", "verdict": "pass"}, "to": {"terminal": "succeeded"}},
+                    {"from": {"stage": "stage one", "gate": "gate one", "verdict": "fail"}, "to": {"stage": None}},
                 ],
             }],
         }
         self.install_v1_skills()
         self.env.write_registry("pipeline", registry)
+        skills_result = list_skills(self.env.home)
+        skills_lookup = {skill["id"]: skill for skill in skills_result["skills"]}
+        ok, _ = doctor_pipelines(self.env.home, skills_lookup)
+        self.assertTrue(ok)
 
-        result = run_pipeline(self.env.home, "fixture", new_session_summary="v1", now_ns=40)
+        result = run_pipeline(
+            self.env.home,
+            "legacy fixture",
+            pipeline_revision="rev 1",
+            new_session_summary="v1",
+            now_ns=40,
+        )
 
         self.assertEqual("succeeded", result["terminalReason"])
         persisted = load_session(self.env.home, result["sessionId"])["session"]

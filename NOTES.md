@@ -66,8 +66,11 @@
     prompt 内嵌阶段/门禁/回退边 + run/advance 说明；**无 key 泄漏**）；`opencode unlink --agents` 只删带 marker 者
   - pipeline registry 版本约束放宽为严格整数 `1|2`；**其余四类 extension 仍只能 `1`**
   - 第一条真实流水线 `bugfix`（investigate→repro→fix→verify）端到端跑通（含回退边与 `attempts_exhausted`）
+  - **Phase 3C 路由（2026-10-12）**：宿主 `decision`（Jev）按固定 classify 契约输出 task type + confidence；
+    `pipeline route` 按 `route.taskTypes/priority` 确定性选择 id+revision；route 不建 session，run 用
+    `--pipeline-revision` 固定版本并持久化 task type；`sync-agents` 同步生成 `orchagent-role-*` subagents
   - v1 语义**保留可用**但**不是前进方向**，由 `version` 与 v2 区分、不混用
-- 未实现：skills/MCP runtime、knowledge 索引、Phase 3C（路由 + 真实流水线）
+- 未实现：skills/MCP runtime、knowledge 索引
 - Phase 3B 的分期与状态**以 [`docs/capability-seams.md`](docs/capability-seams.md) §9 为唯一来源**（此处不重复断言）
 - Phase 3B-0（**仅文档**）：`docs/capability-seams.md`（参考 DeepSeek Harness 的 **capability seam**
   （Definition/Provider/Consumer）+ 本机 opencode/codex 宿主机制实证 + orchAgent 映射）+ 设计决策 **D13**
@@ -94,7 +97,7 @@ python3 -m unittest discover -s tests
 
 - [ ] **方向调整（2026-10-08）**：skill / MCP 归宿主（opencode / codex）机制，**编排层不关心**。3B-1 skill seam 已撤销（`v0.9.1`）。编排层聚焦 **agent 编排** → **已按 v2 role 派发模型落实（v0.10.0，D14）**
 - [ ] 3B-0 的 capability seam 设计（`docs/capability-seams.md` / D13）是否同步退役 —— 待用户定
-- [x] Phase 3C：第一条真实流水线（v2 `bugfix` 已端到端跑通）；剩**路由**（`pipeline.md` §8）未实现
+- [x] Phase 3C：第一条真实流水线 + Jev 分类 / 确定性路由（见 `pipeline.md` §8）
 
 ## 开发流程约束
 
