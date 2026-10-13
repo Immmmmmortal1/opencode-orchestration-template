@@ -15,6 +15,9 @@ from .paths import DEFAULT_HOME, PROJECT_ROOT, template_path
 RUNTIME_DIRS = [
     "extensions",
     "integrations",
+    "prompts",
+    "prompts/templates",
+    "prompts/overrides",
     "state",
     "sessions",
     "locks",

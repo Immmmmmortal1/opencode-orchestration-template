@@ -9,6 +9,13 @@ from typing import Any
 from .backup import create_backup_dir
 from .paths import DEFAULT_HOME
 from .pipeline import load_pipeline_registry, _validate_registry
+from .prompts import (
+    load_prompt_file_contents,
+    load_prompt_registry,
+    prompt_registry_path,
+    render_prompt_registry,
+    validate_prompt_registry,
+)
 
 
 MANAGED_KEY = "orchAgent"
@@ -358,6 +365,35 @@ def sync_agents(home: Path = DEFAULT_HOME) -> dict[str, Any]:
     if validation_error:
         return {"status": "error", "error": "invalid_registry", "message": validation_error["message"]}
 
+    role_ids = {role["id"] for role in registry["roles"]}
+    role_prompts: dict[str, str] = {}
+    prompt_path = prompt_registry_path(home)
+    if os.path.lexists(prompt_path):
+        prompt_registry, prompt_error = load_prompt_registry(home)
+        if prompt_error:
+            return {"status": "error", "error": "invalid_prompt_registry", "message": "prompt registry is invalid"}
+        assert prompt_registry is not None
+        try:
+            file_contents = load_prompt_file_contents(home, prompt_registry)
+        except ValueError:
+            return {"status": "error", "error": "invalid_prompt_registry", "message": "prompt registry is invalid"}
+        prompt_validation = validate_prompt_registry(home, prompt_registry, file_contents)
+        if prompt_validation["status"] != "ok":
+            return {"status": "error", "error": "invalid_prompt_registry", "message": "prompt registry is invalid"}
+        if any(target_prompt["id"] not in role_ids for target_prompt in prompt_registry["targets"]):
+            return {"status": "error", "error": "invalid_prompt_registry", "message": "prompt registry is invalid"}
+        for target_prompt in prompt_registry["targets"]:
+            rendered = render_prompt_registry(
+                home,
+                prompt_registry,
+                target_prompt["prompt"],
+                target_prompt.get("override"),
+                file_contents,
+            )
+            if rendered["status"] != "ok":
+                return {"status": "error", "error": "invalid_prompt_registry", "message": "prompt registry is invalid"}
+            role_prompts[target_prompt["id"]] = rendered["markdown"]
+
     roles = {role["id"]: role for role in registry["roles"]}
     agent_sources: dict[str, list[dict[str, str]]] = {}
     for role in registry["roles"]:
@@ -389,7 +425,7 @@ def sync_agents(home: Path = DEFAULT_HOME) -> dict[str, Any]:
         agent: dict[str, Any] = {
             "mode": "subagent",
             "description": description,
-            "prompt": _role_prompt(role),
+            "prompt": role_prompts.get(role["id"], _role_prompt(role)),
             "marker": MANAGED_MARKER,
             "permission": {"task": "deny"},
         }

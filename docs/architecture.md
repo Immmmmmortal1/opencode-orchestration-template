@@ -61,6 +61,11 @@ orchAgent
 `sessions` / `locks` / `leases` 的权威协议见
 [`session-lock-lease.md`](session-lock-lease.md)（设计决策 D11）。
 
+v0.12.0 的本机 Web 控制台是位于 Core 配置入口之上的本机配置编辑面：v2 可编辑、v1 只读，
+并通过 Prompt Registry 管理 Markdown prompt 的元数据与绑定。它不管理凭据、不扩张执行权限、
+不调用模型或执行 pipeline；Host Resolution 仅消费只读脱敏状态且默认 `unknown`。
+权威规范见 [`console.md`](console.md)（设计决策 D15）。
+
 Phase 3 在此之上增加 **Pipeline 层**（编排）与 **Skill 执行层**（最小执行单元）：
 
 ```text

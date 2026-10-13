@@ -4,8 +4,10 @@ import json
 import copy
 import unittest
 from fnmatch import fnmatchcase
+from unittest import mock
 
 from orchagent.install import backup_root
+from orchagent.opencode import sync_agents
 from tests.helpers import IsolatedEnv
 
 
@@ -41,6 +43,11 @@ class OpenCodeAgentTests(unittest.TestCase):
 
     def read_config(self) -> dict[str, object]:
         return json.loads(self.env.opencode_config.read_text(encoding="utf-8"))
+
+    def write_prompt_registry(self, registry: object) -> None:
+        root = self.env.home / "prompts"
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "prompts.json").write_text(json.dumps(registry), encoding="utf-8")
 
     def test_sync_generates_managed_agent_and_backup(self) -> None:
         code, result, _, _ = self.env.run_cli("opencode", "sync-agents")
@@ -108,6 +115,108 @@ class OpenCodeAgentTests(unittest.TestCase):
             self.assertIn("当前 stage", agent["prompt"])
             self.assertIn("结构化摘要", agent["prompt"])
             self.assertIn("不得自行推进", agent["prompt"])
+
+    def test_sync_uses_rendered_prompt_for_targeted_role(self) -> None:
+        root = self.env.home / "prompts"
+        (root / "templates").mkdir(parents=True, exist_ok=True)
+        (root / "overrides").mkdir(exist_ok=True)
+        (root / "templates" / "base.md").write_text("Base role guidance", encoding="utf-8")
+        (root / "templates" / "fixer.md").write_text("Fixer guidance", encoding="utf-8")
+        (root / "overrides" / "fixer.md").write_text("Project override", encoding="utf-8")
+        self.write_prompt_registry({
+            "version": 1,
+            "prompts": [
+                {"id": "base", "template": "templates/base.md"},
+                {"id": "fixer", "template": "templates/fixer.md", "extends": "base"},
+            ],
+            "targets": [{
+                "kind": "role", "id": "fixer", "prompt": "fixer", "override": "overrides/fixer.md",
+            }],
+        })
+
+        code, result, _, _ = self.env.run_cli("opencode", "sync-agents")
+
+        self.assertEqual(0, code, result)
+        agents = self.read_config()["agent"]
+        self.assertEqual(
+            "Base role guidance\n\nFixer guidance\n\nProject override",
+            agents["orchagent-role-fixer"]["prompt"],
+        )
+        self.assertIn("当前 stage", agents["orchagent-role-investigator"]["prompt"])
+
+    def test_sync_renders_from_the_loaded_prompt_registry(self) -> None:
+        root = self.env.home / "prompts"
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "base.md").write_text("Base", encoding="utf-8")
+        registry = {
+            "version": 1,
+            "prompts": [{"id": "base", "template": "base.md"}],
+            "targets": [{"kind": "role", "id": "fixer", "prompt": "base"}],
+        }
+        (root / "prompts.json").write_text("{}", encoding="utf-8")
+
+        with mock.patch("orchagent.opencode.primary_config_path", return_value=self.env.opencode_config):
+            with mock.patch("orchagent.opencode.load_prompt_registry", return_value=(registry, None)) as load:
+                file_contents = {"base.md": "First snapshot"}
+                with mock.patch("orchagent.opencode.load_prompt_file_contents", return_value=file_contents) as load_files:
+                    with mock.patch(
+                        "orchagent.opencode.render_prompt_registry",
+                        return_value={"status": "ok", "markdown": "Loaded registry prompt", "sources": ["base.md"]},
+                    ) as render:
+                        result = sync_agents(self.env.home)
+
+        self.assertEqual("ok", result["status"])
+        load.assert_called_once_with(self.env.home)
+        load_files.assert_called_once_with(self.env.home, registry)
+        self.assertIs(registry, render.call_args.args[1])
+        self.assertIs(file_contents, render.call_args.args[4])
+        self.assertEqual("Loaded registry prompt", self.read_config()["agent"]["orchagent-role-fixer"]["prompt"])
+
+    def test_invalid_prompt_registry_fails_without_config_or_backup(self) -> None:
+        self.write_prompt_registry({"version": 1, "prompts": "invalid", "targets": []})
+        before = self.env.opencode_config.read_bytes()
+        backups = list(backup_root(self.env.home).glob("opencode-*"))
+
+        code, result, _, _ = self.env.run_cli("opencode", "sync-agents")
+
+        self.assertEqual(1, code)
+        self.assertEqual("error", result["status"])
+        self.assertEqual("invalid_prompt_registry", result["error"])
+        self.assertEqual(before, self.env.opencode_config.read_bytes())
+        self.assertEqual(backups, list(backup_root(self.env.home).glob("opencode-*")))
+
+    def test_prompt_registry_unknown_role_target_fails_without_config_or_backup(self) -> None:
+        root = self.env.home / "prompts"
+        (root / "templates").mkdir(parents=True, exist_ok=True)
+        (root / "templates" / "base.md").write_text("Base", encoding="utf-8")
+        self.write_prompt_registry({
+            "version": 1,
+            "prompts": [{"id": "base", "template": "templates/base.md"}],
+            "targets": [{"kind": "role", "id": "missing", "prompt": "base"}],
+        })
+        before = self.env.opencode_config.read_bytes()
+        backups = list(backup_root(self.env.home).glob("opencode-*"))
+
+        code, result, _, _ = self.env.run_cli("opencode", "sync-agents")
+
+        self.assertEqual(1, code)
+        self.assertEqual("invalid_prompt_registry", result["error"])
+        self.assertEqual(before, self.env.opencode_config.read_bytes())
+        self.assertEqual(backups, list(backup_root(self.env.home).glob("opencode-*")))
+
+    def test_sync_without_prompt_registry_keeps_default_role_prompt(self) -> None:
+        self.assertFalse((self.env.home / "prompts" / "prompts.json").exists())
+
+        code, result, _, _ = self.env.run_cli("opencode", "sync-agents")
+
+        self.assertEqual(0, code, result)
+        self.assertEqual(
+            "角色职责：fixer，实施修复。\n"
+            "只处理主 agent 派发的当前 stage。\n"
+            "返回可用于当前门禁判定的结构化摘要。\n"
+            "不得自行推进 pipeline、调用 pipeline advance，或派发其他 agent。",
+            self.read_config()["agent"]["orchagent-role-fixer"]["prompt"],
+        )
 
     def test_sync_is_idempotent_without_backup(self) -> None:
         self.env.run_cli("opencode", "sync-agents")

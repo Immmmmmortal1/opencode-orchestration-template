@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>orchAgent Console</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header><div><strong>orchAgent</strong><span>Console</span></div><button id="reload">重新加载</button></header>
+  <main>
+    <section id="notice" class="notice loading">正在读取本地配置…</section>
+    <section class="grid">
+      <article><h2>Snapshot</h2><dl id="snapshot"></dl></article>
+      <article><h2>Host Resolution <small>只读</small></h2><div id="hosts">等待加载</div></article>
+    </section>
+    <article><h2>Roles <small>v2；只保存 provider/model 名称</small></h2><div id="roles">等待加载</div><div id="role-editor" class="role-editor"></div></article>
+    <article>
+      <div class="title-row"><div><h2>Draft</h2><p>输入完整 Draft JSON；所有结果均由本地 API 返回。</p></div><span id="dirty" class="pill">clean</span></div>
+      <textarea id="draft" spellcheck="false" aria-label="Draft JSON"></textarea>
+      <div class="actions">
+        <button data-action="validate">校验</button><button data-action="preview">预览</button><button data-action="diff">Diff</button><button data-action="apply" class="primary">Apply</button>
+      </div>
+      <pre id="result">尚未执行操作</pre>
+    </article>
+    <article><h2>Backups</h2><div id="backups">等待加载</div></article>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

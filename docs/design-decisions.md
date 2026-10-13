@@ -321,3 +321,17 @@ registry 会制造第二真相源。
   `sync-agents` 生成 role subagents 和 pipeline 直达 agents，后者不重复调用 Jev。
 
 规范与错误语义以 [`pipeline.md`](pipeline.md) §8 为唯一来源。
+
+## D15. 本机 Web 控制台与 Prompt Registry
+
+用户已确认（2026-10-12）。v0.12.0 增加本机配置编辑面，用于浏览配置、编辑 v2 pipeline 与维护
+Markdown prompt；v1 保持只读。控制台默认只监听 `127.0.0.1`，使用 Python 标准库，不改变
+orchAgent 不管理凭据、不调用模型、不执行 pipeline 的边界。
+
+Prompt 正文保存在 Markdown 文件中；Prompt Registry 只保存元数据、template file path、继承、target
+绑定与显式 override。保存采用 snapshot hash 冲突检测、多文件事务、原子替换、备份与一次性回滚。
+Host Resolution 仅为只读脱敏 seam；默认 adapter 返回 `unknown`，直到显式实现且实证一个安全宿主
+adapter，不得从配置存在性推断解析成功。
+
+**字段、API、事务、安全与验证规范以 [`console.md`](console.md) 为唯一来源，本文不复制。**
+代码与文档冲突时遵循 [D9](design-decisions.md)，先暂停并让用户确认。

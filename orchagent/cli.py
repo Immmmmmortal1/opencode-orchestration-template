@@ -5,6 +5,10 @@ import json
 import sys
 
 from .config import validate_all
+from .console_api import snapshot as console_snapshot
+from .console_server import DEFAULT_HOST as CONSOLE_DEFAULT_HOST
+from .console_server import DEFAULT_PORT as CONSOLE_DEFAULT_PORT
+from .console_server import serve as serve_console
 from .doctor import run_doctor
 from .extensions import list_extensions
 from .hooks import doctor_hooks, dry_run_hooks, list_hooks
@@ -205,6 +209,24 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
     return 2
 
 
+def cmd_console(args: argparse.Namespace) -> int:
+    if args.console_cmd in {"snapshot", "validate"}:
+        result = console_snapshot(DEFAULT_HOME)
+        print_json(result)
+        return 0 if result.get("status") == "ok" else 1
+    if args.console_cmd == "serve":
+        if args.host != CONSOLE_DEFAULT_HOST:
+            print_json({"status": "error", "error": "console_host_must_be_loopback"})
+            return 1
+        try:
+            serve_console(args.host, args.port, DEFAULT_HOME)
+        except (OSError, ValueError) as exc:
+            print_json({"status": "error", "error": "console_serve_failed", "message": str(exc)})
+            return 1
+        return 0
+    return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orchagent")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -294,6 +316,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_pipeline_advance.add_argument("--verdict", required=True, choices=["pass", "fail"])
     p_pipeline_advance.add_argument("--evidence")
     p_pipeline.set_defaults(func=cmd_pipeline)
+
+    p_console = sub.add_parser("console")
+    console_sub = p_console.add_subparsers(dest="console_cmd", required=True)
+    console_sub.add_parser("snapshot")
+    console_sub.add_parser("validate")
+    p_console_serve = console_sub.add_parser("serve")
+    p_console_serve.add_argument("--host", default=CONSOLE_DEFAULT_HOST)
+    p_console_serve.add_argument("--port", type=int, default=CONSOLE_DEFAULT_PORT)
+    p_console.set_defaults(func=cmd_console)
     return parser
 
 

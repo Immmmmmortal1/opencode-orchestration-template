@@ -1,0 +1,1266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>orchAgent 控制台</title>
+<meta name="color-scheme" content="dark">
+<style>
+  :root {
+    color-scheme: dark;
+
+    /* 分层灰阶：页面 < 侧栏 < 卡片 < 输入 */
+    --bg: #0b0d11;
+    --sidebar: #0e1117;
+    --surface: #141821;
+    --surface-2: #171c26;
+    --surface-hover: #1a202c;
+    --input-bg: #10141c;
+    --border: #232a38;
+    --border-strong: #2f384a;
+
+    /* 文本三档 */
+    --text: #e8ebf2;
+    --text-2: #98a1b5;
+    --text-3: #7d879b;
+
+    /* 单一强调色（蓝） + 语义色 */
+    --accent: #4d7fff;
+    --accent-hover: #6491ff;
+    --accent-weak: rgba(77, 127, 255, .14);
+    --success: #3fb97e;
+    --success-weak: rgba(63, 185, 126, .13);
+    --warning: #e0a93e;
+    --warning-weak: rgba(224, 169, 62, .13);
+    --danger: #e0554e;
+    --danger-weak: rgba(224, 85, 78, .13);
+
+    /* 圆角 */
+    --r-sm: 8px;
+    --r: 10px;
+    --r-md: 12px;
+
+    /* 字号（共 5 档） */
+    --fs-xs: 11px;
+    --fs-sm: 13px;
+    --fs-md: 14px;
+    --fs-lg: 20px;
+    --fs-xl: 24px;
+
+    --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: var(--font-sans); font-size: var(--fs-sm); line-height: 1.5;
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+    height: 100vh; overflow: hidden;
+  }
+  ::selection { background: var(--accent-weak); }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #232b39; border-radius: 5px; border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: #2f384a; }
+
+  /* ============ 布局骨架 ============ */
+  .app { display: grid; grid-template-columns: 224px 1fr; height: 100vh; }
+
+  /* ============ 侧边栏 ============ */
+  .sidebar {
+    background: var(--sidebar); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    padding: 20px 20px 16px;
+  }
+  .brand-mark {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: var(--accent); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 14px; flex-shrink: 0;
+  }
+  .brand-name { font-size: var(--fs-md); font-weight: 650; letter-spacing: -0.01em; line-height: 1.2; }
+  .brand-ver { font-size: var(--fs-xs); color: var(--text-3); font-family: var(--font-mono); }
+
+  .nav { flex: 1; overflow-y: auto; padding: 4px 12px 12px; }
+  .nav-group { margin-top: 20px; }
+  .nav-group:first-child { margin-top: 8px; }
+  .nav-group-label {
+    font-size: var(--fs-xs); color: var(--text-3); font-weight: 600;
+    letter-spacing: .06em; text-transform: uppercase; padding: 0 8px; margin-bottom: 4px;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; margin-bottom: 2px; border-radius: var(--r-sm);
+    color: var(--text-2); cursor: pointer; font-weight: 500; user-select: none;
+    transition: background .12s ease, color .12s ease;
+  }
+  .nav-item:hover { background: rgba(255,255,255,.03); color: var(--text); }
+  .nav-item.active { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
+  .nav-item svg { width: 16px; height: 16px; flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .nav-badge {
+    margin-left: auto; font-size: var(--fs-xs); font-family: var(--font-mono);
+    color: var(--text-3); background: rgba(255,255,255,.04);
+    padding: 1px 6px; border-radius: 999px;
+  }
+
+  .sidebar-foot {
+    border-top: 1px solid var(--border); padding: 14px 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot.ok { background: var(--success); }
+  .dot.warn { background: var(--warning); }
+  .dot.err { background: var(--danger); }
+  .sidebar-foot .txt { font-size: var(--fs-xs); color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ============ 主区 ============ */
+  .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+  .topbar {
+    height: 56px; flex-shrink: 0;
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 24px; border-bottom: 1px solid var(--border);
+    background: var(--bg);
+  }
+  .topbar-title { font-size: var(--fs-md); font-weight: 650; letter-spacing: -0.01em; }
+  .topbar-sub { font-size: var(--fs-xs); color: var(--text-3); }
+  .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+
+  .sync-pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: var(--fs-xs); font-weight: 500;
+    padding: 4px 10px; border-radius: 999px;
+  }
+  .sync-pill.clean { color: var(--text-3); background: rgba(255,255,255,.04); }
+  .sync-pill.dirty { color: var(--warning); background: var(--warning-weak); }
+  .sync-pill.saved { color: var(--success); background: var(--success-weak); }
+
+  /* ============ 按钮 ============ */
+  button {
+    font-family: inherit; font-size: var(--fs-sm); font-weight: 500;
+    background: var(--accent); color: #fff; border: none;
+    border-radius: var(--r-sm); padding: 7px 14px; cursor: pointer;
+    transition: background .12s ease, border-color .12s ease, color .12s ease, opacity .12s ease;
+  }
+  button:hover { background: var(--accent-hover); }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text-2); }
+  button.ghost:hover { color: var(--text); border-color: var(--border-strong); background: rgba(255,255,255,.02); }
+  button.danger { background: transparent; border: 1px solid var(--border); color: var(--danger); }
+  button.danger:hover { border-color: var(--danger); background: var(--danger-weak); }
+  button.btn-sm { padding: 5px 10px; font-size: var(--fs-xs); border-radius: 6px; }
+  button.icon {
+    width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+    background: transparent; border: 1px solid var(--border); color: var(--text-2); border-radius: var(--r-sm);
+  }
+  button.icon:hover { color: var(--text); border-color: var(--border-strong); background: rgba(255,255,255,.02); }
+  button.icon svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ============ 内容区 ============ */
+  .content { flex: 1; overflow-y: auto; padding: 24px 24px 48px; min-height: 0; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  .page-head { margin-bottom: 20px; }
+  .page-title { font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.02em; }
+  .page-desc { color: var(--text-2); font-size: var(--fs-sm); margin-top: 2px; max-width: 640px; }
+
+  /* ============ 卡片 ============ */
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-md); overflow: hidden;
+  }
+  .card + .card { margin-top: 16px; }
+  .card-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 16px; border-bottom: 1px solid var(--border);
+  }
+  .card-head .t { font-size: var(--fs-md); font-weight: 650; letter-spacing: -0.01em; }
+  .card-head .hint { font-size: var(--fs-xs); color: var(--text-3); }
+  .card-head .spacer { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .card-body { padding: 16px; }
+
+  /* ============ 徽章 / 标签 ============ */
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: var(--fs-xs); font-weight: 600; line-height: 1; white-space: nowrap;
+    padding: 4px 8px; border-radius: 999px;
+  }
+  .badge .dot { width: 6px; height: 6px; }
+  .badge.ok { background: var(--success-weak); color: var(--success); }
+  .badge.warn { background: var(--warning-weak); color: var(--warning); }
+  .badge.err { background: var(--danger-weak); color: var(--danger); }
+  .badge.muted { background: rgba(255,255,255,.05); color: var(--text-2); }
+  .badge.accent { background: var(--accent-weak); color: var(--accent); }
+
+  .tag {
+    display: inline-flex; align-items: center; font-size: var(--fs-xs); font-weight: 500;
+    padding: 2px 7px; border-radius: 5px; font-family: var(--font-mono); line-height: 1.4;
+    background: rgba(255,255,255,.05); color: var(--text-2);
+  }
+
+  /* ============ 指标卡（Runtime 总览） ============ */
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .metric {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
+    padding: 16px;
+  }
+  .metric .label { font-size: var(--fs-xs); color: var(--text-3); margin-bottom: 8px; }
+  .metric .value { font-size: var(--fs-xl); font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .metric .sub { font-size: var(--fs-xs); color: var(--text-2); margin-top: 4px; }
+
+  /* ============ 表格 ============ */
+  .table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+  .table th, .table td { text-align: left; padding: 10px 16px; vertical-align: middle; }
+  .table thead th {
+    color: var(--text-3); font-weight: 500; font-size: var(--fs-xs);
+    border-bottom: 1px solid var(--border-strong); background: rgba(255,255,255,.015);
+    white-space: nowrap;
+  }
+  .table tbody td { border-bottom: 1px solid var(--border); }
+  .table tbody tr:last-child td { border-bottom: none; }
+  .table tbody tr:hover { background: rgba(255,255,255,.015); }
+  .mono { font-family: var(--font-mono); font-size: 12px; }
+
+  /* ============ 表格横向滚动（窄屏） ============ */
+  .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table-scroll .table { min-width: 640px; }
+
+  /* ============ 演示数据提示 ============ */
+  .demo-note {
+    display: flex; align-items: flex-start; gap: 10px;
+    background: rgba(255,255,255,.04); border: 1px solid var(--border);
+    border-radius: var(--r); padding: 12px 14px; color: var(--text-2);
+    margin-bottom: 16px;
+  }
+  .demo-note .ico { flex-shrink: 0; margin-top: 1px; }
+  .demo-note .ico svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .demo-note .t { font-weight: 600; color: var(--text); font-size: var(--fs-sm); }
+  .demo-note .d { font-size: var(--fs-xs); margin-top: 2px; }
+
+  /* ============ 侧栏折叠 / 窄屏 ============ */
+  .app { transition: grid-template-columns .15s ease; }
+  .app.collapsed { grid-template-columns: 64px 1fr; }
+  .app.collapsed .brand { justify-content: center; padding: 20px 0 16px; }
+  .app.collapsed .brand > div:last-child { display: none; }
+  .app.collapsed .nav { padding: 4px 8px 12px; }
+  .app.collapsed .nav-group { margin-top: 16px; }
+  .app.collapsed .nav-group-label { display: none; }
+  .app.collapsed .nav-item { justify-content: center; gap: 0; padding: 9px 0; font-size: 0; }
+  .app.collapsed .nav-badge { display: none; }
+  .app.collapsed .sidebar-foot { justify-content: center; padding: 14px 0; }
+  .app.collapsed .sidebar-foot .txt { display: none; }
+
+  @media (max-width: 1024px) {
+    .content { padding: 16px 16px 48px; }
+    .topbar { padding: 0 16px; }
+    .metrics { grid-template-columns: repeat(2, 1fr); }
+    .kv { grid-template-columns: 110px 1fr; }
+  }
+
+  /* ============ Workflow Graph ============ */
+  .wf-wrap { overflow-x: auto; }
+  .wf-legend { display: flex; gap: 16px; padding: 12px 16px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+  .wf-legend .li { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-2); }
+
+  /* ============ 编辑表单 ============ */
+  .field { margin-bottom: 14px; }
+  .field:last-child { margin-bottom: 0; }
+  .field label { display: block; font-size: var(--fs-xs); color: var(--text-2); margin-bottom: 6px; font-weight: 500; }
+  .field input, .field textarea {
+    width: 100%; background: var(--input-bg); border: 1px solid var(--border);
+    color: var(--text); border-radius: var(--r-sm); padding: 8px 12px; font-size: var(--fs-sm);
+    font-family: inherit; line-height: 1.45;
+    transition: border-color .12s ease, box-shadow .12s ease;
+  }
+  .field input:focus, .field textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
+  .field input::placeholder, .field textarea::placeholder { color: var(--text-3); }
+  .field textarea { min-height: 120px; resize: vertical; font-family: var(--font-mono); font-size: 12px; }
+  .field .err-msg { color: var(--danger); font-size: var(--fs-xs); margin-top: 5px; display: none; }
+  .field.invalid input { border-color: var(--danger); }
+  .field.invalid .err-msg { display: block; }
+
+  /* ============ 空/错误状态 ============ */
+  .state-box { padding: 40px 16px; text-align: center; color: var(--text-3); }
+  .state-box .ico { width: 32px; height: 32px; margin: 0 auto 12px; color: var(--text-3); }
+  .state-box .ico svg { width: 100%; height: 100%; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .state-box .t { font-size: var(--fs-sm); color: var(--text-2); }
+  .state-box .d { font-size: var(--fs-xs); margin-top: 4px; }
+
+  .error-banner {
+    display: flex; align-items: flex-start; gap: 10px;
+    background: var(--danger-weak); border: 1px solid rgba(224,85,78,.25);
+    border-radius: var(--r); padding: 12px 14px; color: var(--text);
+  }
+  .error-banner .ico { color: var(--danger); flex-shrink: 0; margin-top: 1px; }
+  .error-banner .ico svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .error-banner .t { font-weight: 600; font-size: var(--fs-sm); }
+  .error-banner .d { font-size: var(--fs-xs); color: var(--text-2); margin-top: 2px; }
+
+  /* ============ Diff ============ */
+  .diff { font-family: var(--font-mono); font-size: 12px; line-height: 1.6; }
+  .diff .dl { display: flex; padding: 1px 12px; }
+  .diff .dl .n { width: 32px; flex-shrink: 0; color: var(--text-3); text-align: right; padding-right: 10px; user-select: none; }
+  .diff .dl.add { background: rgba(63,185,126,.10); }
+  .diff .dl.add .mark { color: var(--success); }
+  .diff .dl.del { background: rgba(224,85,78,.10); }
+  .diff .dl.del .mark { color: var(--danger); }
+  .diff .dl .code { white-space: pre-wrap; word-break: break-all; }
+  .diff .dl .mark { width: 14px; flex-shrink: 0; }
+
+  /* ============ Toast ============ */
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translate(-50%, 12px);
+    background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text);
+    padding: 10px 18px; border-radius: var(--r); font-size: var(--fs-sm);
+    box-shadow: 0 8px 24px rgba(0,0,0,.4); opacity: 0; pointer-events: none; z-index: 100;
+    transition: opacity .18s ease, transform .18s ease; max-width: 480px;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast .t { font-weight: 600; }
+  .toast .d { font-size: var(--fs-xs); color: var(--text-2); margin-top: 2px; }
+
+  /* ============ 模态 ============ */
+  .modal-mask {
+    position: fixed; inset: 0; background: rgba(0,0,0,.5);
+    display: none; align-items: center; justify-content: center; z-index: 90;
+  }
+  .modal-mask.open { display: flex; }
+  .modal {
+    background: var(--surface-2); border: 1px solid var(--border-strong);
+    border-radius: var(--r-md); width: 480px; max-width: calc(100vw - 48px);
+    box-shadow: 0 16px 48px rgba(0,0,0,.5);
+  }
+  .modal-head { padding: 16px 20px; border-bottom: 1px solid var(--border); font-weight: 650; font-size: var(--fs-md); display: flex; align-items: center; gap: 10px; }
+  .modal-body { padding: 20px; }
+  .modal-foot { padding: 16px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
+
+  /* ============ Loading 骨架 ============ */
+  .skeleton {
+    position: fixed; inset: 224px 0 0 224px; z-index: 80;
+    background: var(--bg); padding: 24px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .skeleton.hidden { display: none; }
+  .sk { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); }
+  .sk-line { height: 12px; border-radius: 6px; background: var(--surface-2); margin: 14px 16px; opacity: .6; }
+  .sk-line.w40 { width: 40%; } .sk-line.w70 { width: 70%; } .sk-line.w90 { width: 90%; }
+  @keyframes pulse { 0%,100% { opacity: .4; } 50% { opacity: .8; } }
+  .sk-line { animation: pulse 1.2s ease-in-out infinite; }
+
+  .kv { display: grid; grid-template-columns: 130px 1fr; gap: 8px 16px; font-size: var(--fs-sm); }
+  .kv .k { color: var(--text-3); font-size: var(--fs-xs); padding-top: 2px; }
+  .kv .v { font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ============ 侧边栏 ============ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">o</div>
+      <div>
+        <div class="brand-name">orchAgent</div>
+        <div class="brand-ver">v0.11.0</div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <div class="nav-group">
+        <div class="nav-group-label">概览</div>
+        <div class="nav-item active" data-view="runtime">
+          <svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>
+          Runtime Status
+        </div>
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-group-label">编排</div>
+        <div class="nav-item" data-view="workflow">
+          <svg viewBox="0 0 24 24"><path d="M6 3v3"/><path d="M6 6a3 3 0 0 0 3 3h6a3 3 0 0 1 3 3v3"/><path d="M6 6a3 3 0 0 1-3 3v6a3 3 0 0 0 3 3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/></svg>
+          Workflow Graph
+        </div>
+        <div class="nav-item" data-view="roles">
+          <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Roles
+          <span class="nav-badge">3</span>
+        </div>
+        <div class="nav-item" data-view="prompts">
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg>
+          Prompts
+        </div>
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-group-label">配置</div>
+        <div class="nav-item" data-view="extensions">
+          <svg viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          Extensions
+          <span class="nav-badge">5</span>
+        </div>
+        <div class="nav-item" data-view="credentials">
+          <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          Host Resolution
+        </div>
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-group-label">运维</div>
+        <div class="nav-item" data-view="changes">
+          <svg viewBox="0 0 24 24"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
+          Changes &amp; Rollback
+        </div>
+      </div>
+    </nav>
+
+    <div class="sidebar-foot">
+      <span class="dot ok" id="foot-dot"></span>
+      <span class="txt" id="foot-txt">~/ .orchAgent · 已链接 opencode</span>
+    </div>
+  </aside>
+
+  <!-- ============ 主区 ============ -->
+  <div class="main">
+    <header class="topbar">
+      <button class="icon" id="btn-collapse" onclick="toggleSidebar()" title="折叠 / 展开侧栏" style="flex-shrink:0">
+        <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <div>
+        <span class="topbar-title" id="topbar-title">Runtime Status</span>
+        <span class="topbar-sub" id="topbar-sub">运行时总览与健康状态</span>
+      </div>
+      <div class="topbar-right">
+        <span class="sync-pill clean" id="sync-pill"><span class="dot" style="width:6px;height:6px;background:currentColor"></span><span id="sync-label">已同步</span></span>
+        <button class="icon" id="btn-reload" title="重新加载" onclick="doReload()">
+          <svg viewBox="0 0 24 24"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="content">
+
+      <!-- ======================= Runtime Status ======================= -->
+      <section class="view active" id="view-runtime">
+        <div class="page-head">
+          <div class="page-title">Runtime Status</div>
+          <div class="page-desc">orchAgent 本地运行时总览。本页为演示视图，以下数据均为 mock 示例，不反映真实运行时状态。</div>
+        </div>
+
+        <div class="demo-note">
+          <span class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg></span>
+          <div>
+            <div class="t">演示数据</div>
+            <div class="d">本页展示界面结构与信息层级；session 数、错误、变更记录均为占位示例，非真实运行时数据。</div>
+          </div>
+        </div>
+
+        <div class="metrics">
+          <div class="metric">
+            <div class="label">Config 校验</div>
+            <div class="value" style="color:var(--text-3)">—</div>
+            <div class="sub">demo 占位 · 未执行 doctor</div>
+          </div>
+          <div class="metric">
+            <div class="label">编排模式</div>
+            <div class="value">dispatch</div>
+            <div class="sub">v2 role 派发 · 不执行不碰 key</div>
+          </div>
+          <div class="metric">
+            <div class="label">活跃 Session</div>
+            <div class="value" style="color:var(--text-3)">—</div>
+            <div class="sub">demo 占位 · 无真实数据</div>
+          </div>
+          <div class="metric">
+            <div class="label">可回滚变更</div>
+            <div class="value" style="color:var(--text-3)">—</div>
+            <div class="sub">demo 占位 · 无真实记录</div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-head">
+            <span class="t">扩展运行时能力</span>
+            <span class="hint">declared = 已索引校验；runtime 表示当前可执行的层级</span>
+            <div class="spacer"><span class="badge ok"><span class="dot"></span>5 declared</span></div>
+          </div>
+          <div class="table-scroll">
+          <table class="table">
+            <thead><tr><th>扩展</th><th>状态</th><th>运行时能力</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="mono">hooks</td>
+                <td><span class="badge ok"><span class="dot"></span>declared</span></td>
+                <td><span class="badge warn"><span class="dot"></span>dryRunOnly</span></td>
+                <td style="color:var(--text-2)">只做 dry-run，不执行真实业务</td>
+              </tr>
+              <tr>
+                <td class="mono">knowledge</td>
+                <td><span class="badge ok"><span class="dot"></span>declared</span></td>
+                <td><span class="badge warn"><span class="dot"></span>searchOnly</span></td>
+                <td style="color:var(--text-2)">仅显式 list / search，不做索引</td>
+              </tr>
+              <tr>
+                <td class="mono">skills</td>
+                <td><span class="badge ok"><span class="dot"></span>declared</span></td>
+                <td><span class="badge muted">notImplemented</span></td>
+                <td style="color:var(--text-3)">归宿主机制，编排层不执行</td>
+              </tr>
+              <tr>
+                <td class="mono">mcp</td>
+                <td><span class="badge ok"><span class="dot"></span>declared</span></td>
+                <td><span class="badge muted">notImplemented</span></td>
+                <td style="color:var(--text-3)">归宿主，编排层不执行</td>
+              </tr>
+              <tr>
+                <td class="mono">pipeline</td>
+                <td><span class="badge ok"><span class="dot"></span>declared</span></td>
+                <td><span class="badge accent"><span class="dot"></span>dispatchOnly</span></td>
+                <td style="color:var(--text-2)">v2：只输出 role 派发指令</td>
+              </tr>
+            </tbody>
+          </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================= Workflow Graph ======================= -->
+      <section class="view" id="view-workflow">
+        <div class="page-head">
+          <div class="page-title">Workflow Graph</div>
+          <div class="page-desc">bugfix 流水线（v2 · revision 1）：四个阶段 + 门禁 + 回退边，阶段绑定已声明的 role。</div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="t">bugfix</span>
+            <span class="tag">revision 1</span>
+            <span class="tag">route: bug</span>
+            <span class="tag">priority 10</span>
+            <span class="badge accent"><span class="dot"></span>enabled</span>
+            <div class="spacer"><span class="hint">entryStage: investigate</span></div>
+          </div>
+          <div class="wf-wrap">
+            <svg id="wf-svg" viewBox="0 0 920 300" width="920" height="300" style="display:block;margin:8px auto"></svg>
+          </div>
+          <div class="wf-legend">
+            <span class="li"><span style="width:18px;height:0;border-top:2px solid var(--success);display:inline-block"></span>pass 推进</span>
+            <span class="li"><span style="width:18px;height:0;border-top:2px dashed var(--danger);display:inline-block"></span>fail 回退 / 终止</span>
+            <span class="li"><span style="width:18px;height:0;border-top:2px solid var(--text-3);display:inline-block"></span>阶段 → 门禁判定</span>
+            <span class="li"><span style="width:12px;height:12px;border:2px solid var(--accent);border-radius:3px;display:inline-block;background:var(--accent-weak)"></span>当前阶段</span>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-head"><span class="t">阶段 / 门禁明细</span><div class="spacer"><span class="hint">maxAttempts 为阶段最大尝试次数（含首次）</span></div></div>
+          <div class="table-scroll">
+          <table class="table">
+            <thead><tr><th>阶段</th><th>role</th><th>maxAttempts</th><th>门禁</th><th>pass →</th><th>fail →</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">investigate</td><td class="mono">investigator</td><td class="mono">2</td><td class="mono">gate-investigate-evidence</td><td class="mono">repro</td><td style="color:var(--danger)" class="mono">终止</td></tr>
+              <tr><td class="mono">repro</td><td class="mono">investigator</td><td class="mono">3</td><td class="mono">gate-repro-red-capable</td><td class="mono">fix</td><td style="color:var(--danger)" class="mono">终止</td></tr>
+              <tr><td class="mono">fix</td><td class="mono">fixer</td><td class="mono">3</td><td class="mono">gate-fix-implementation</td><td class="mono">verify</td><td style="color:var(--danger)" class="mono">fix（重试）</td></tr>
+              <tr><td class="mono">verify</td><td class="mono">verifier</td><td class="mono">3</td><td class="mono">gate-verify-regression</td><td class="mono">succeeded</td><td style="color:var(--danger)" class="mono">repro（回退）</td></tr>
+            </tbody>
+          </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================= Roles ======================= -->
+      <section class="view" id="view-roles">
+        <div class="page-head">
+          <div class="page-title">Roles</div>
+          <div class="page-desc">角色声明（v2）。role 只存 <code class="mono">id</code> / <code class="mono">provider</code> / <code class="mono">model</code> / <code class="mono">description</code> 四项名字，<strong>不存任何凭证</strong>；真正调用由宿主完成。</div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="t">角色列表</span>
+            <span class="hint">role 只存名字，不含凭证</span>
+            <div class="spacer"><button class="btn-sm" onclick="newRole()">新建 role</button></div>
+          </div>
+          <div class="table-scroll">
+            <table class="table">
+              <thead><tr><th>id</th><th>provider</th><th>model</th><th>description</th><th></th></tr></thead>
+              <tbody id="role-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-head"><span class="t">编辑 role</span><span class="hint" id="role-edit-hint">选择上方角色后在此编辑</span></div>
+          <div class="card-body" id="role-edit-body"></div>
+        </div>
+      </section>
+
+      <!-- ======================= Prompts ======================= -->
+      <section class="view" id="view-prompts">
+        <div class="page-head">
+          <div class="page-title">Prompts</div>
+          <div class="page-desc">各角色的提示词。spec 优先（引用默认 spec 文件），本地覆盖需显式选择。</div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="t">提示词来源</span>
+            <span class="hint">spec = 引用默认文件；override = 本地覆盖</span>
+          </div>
+          <div class="table-scroll">
+          <table class="table">
+            <thead><tr><th>角色</th><th>来源</th><th>prompt</th><th></th></tr></thead>
+            <tbody id="prompt-body"></tbody>
+          </table>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-head"><span class="t">编辑 prompt</span><span class="hint" id="prompt-edit-hint">选择上方角色后在此编辑</span></div>
+          <div class="card-body">
+            <div class="field">
+              <label>来源模式</label>
+              <div id="prompt-mode" style="display:flex;gap:8px">
+                <button class="ghost btn-sm" data-pm="spec" onclick="setPromptMode('spec')">使用默认 spec</button>
+                <button class="btn-sm" data-pm="override" onclick="setPromptMode('override')">本地覆盖（高级）</button>
+              </div>
+            </div>
+            <div id="prompt-spec-info" style="display:none;margin-bottom:14px" class="error-banner" >
+              <span class="ico"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span>
+              <div><div class="t">使用默认 spec 引用</div><div class="d" id="prompt-spec-ref"></div></div>
+            </div>
+            <div class="field" id="prompt-textarea-field">
+              <label>prompt</label>
+              <textarea id="prompt-textarea" placeholder="提示词内容…"></textarea>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:10px">
+              <button class="ghost" onclick="resetPromptEdit()">还原</button>
+              <button id="prompt-save" onclick="savePrompt()">保存 prompt</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================= Extensions ======================= -->
+      <section class="view" id="view-extensions">
+        <div class="page-head">
+          <div class="page-title">Extensions</div>
+          <div class="page-desc">五类扩展统一通过配置声明：<code class="mono">hooks / skills / mcp / knowledge / pipeline</code>。</div>
+        </div>
+        <div class="card" id="ext-card"></div>
+      </section>
+
+      <!-- ======================= Host Resolution ======================= -->
+      <section class="view" id="view-credentials">
+        <div class="page-head">
+          <div class="page-title">Host Resolution</div>
+          <div class="page-desc">宿主解析状态。本页<strong>完全只读</strong>：orchAgent 不管理、不读取、不显示任何 key 或环境变量引用，仅消费宿主返回的脱敏解析结果。</div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="t">解析状态</span>
+            <span class="hint">resolved = 已解析可用 · unresolved = 未解析 · unknown = 未声明</span>
+            <div class="spacer"><span class="badge muted"><span class="dot"></span>read-only</span></div>
+          </div>
+          <div class="table-scroll">
+            <table class="table">
+              <thead><tr><th>Provider</th><th>解析状态</th><th>说明</th></tr></thead>
+              <tbody>
+                <tr><td class="mono">deepseek</td><td><span class="badge ok"><span class="dot"></span>resolved</span></td><td style="color:var(--text-2)">宿主已解析到非空值</td></tr>
+                <tr><td class="mono">glm</td><td><span class="badge ok"><span class="dot"></span>resolved</span></td><td style="color:var(--text-2)">宿主已解析到非空值</td></tr>
+                <tr><td class="mono">openai</td><td><span class="badge ok"><span class="dot"></span>resolved</span></td><td style="color:var(--text-2)">宿主已解析到非空值</td></tr>
+                <tr><td class="mono">qwen</td><td><span class="badge warn"><span class="dot"></span>unresolved</span></td><td style="color:var(--text-2)">宿主未解析到值</td></tr>
+                <tr><td class="mono">doubao</td><td><span class="badge muted">unknown</span></td><td style="color:var(--text-3)">未声明</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="padding:12px 16px;border-top:1px solid var(--border);font-size:var(--fs-xs);color:var(--text-3)">
+            只读视图：不渲染、不请求、不持久化任何 key / 环境变量名 / 引用值；状态由宿主脱敏后返回。
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================= Changes & Rollback ======================= -->
+      <section class="view" id="view-changes">
+        <div class="page-head">
+          <div class="page-title">Changes &amp; Rollback</div>
+          <div class="page-desc">变更与回滚。每次写入生成 rollback manifest，回滚一次性消费。</div>
+        </div>
+
+        <div class="card" id="changes-card"></div>
+      </section>
+
+    </div><!-- /.content -->
+  </div><!-- /.main -->
+</div><!-- /.app -->
+
+<!-- Loading 骨架 -->
+<div class="skeleton" id="skeleton">
+  <div class="sk"><div class="sk-line w40"></div><div class="sk-line w70"></div></div>
+  <div class="sk"><div class="sk-line w90"></div><div class="sk-line w40"></div><div class="sk-line w70"></div></div>
+  <div class="sk"><div class="sk-line w70"></div><div class="sk-line w90"></div></div>
+</div>
+
+<!-- 冲突模态 -->
+<div class="modal-mask" id="conflict-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <span style="color:var(--warning)">⚠</span> 保存冲突
+    </div>
+    <div class="modal-body">
+      <div class="error-banner" style="background:var(--warning-weak);border-color:rgba(224,169,62,.25)">
+        <span class="ico" style="color:var(--warning)"><svg viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span>
+        <div>
+          <div class="t">配置已被其他会话修改</div>
+          <div class="d">目标 <code class="mono" id="conflict-target"></code> 在您编辑期间发生了 revision 变更。覆盖将丢弃他人的改动。</div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" onclick="closeConflict()">放弃本次修改</button>
+      <button class="danger" onclick="resolveConflict(true)">覆盖并保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+/* ============ 模拟数据（硬编码，不读真实凭据、不请求后端） ============ */
+const ROLES = [
+  { id: "investigator", provider: "deepseek", model: "deepseek-v4-flash", description: "定位根因并建立可复现证据" },
+  { id: "fixer",        provider: "glm",      model: "glm-5.2",        description: "按确认方案实施最小修复" },
+  { id: "verifier",     provider: "openai",   model: "gpt-5.5",        description: "验证回归测试与原始复现" },
+];
+
+const PROMPTS = {
+  investigator: { source: "spec",    ref: "{file:prompts/investigator.md}",   text: "" },
+  fixer:        { source: "spec",    ref: "{file:prompts/fixer.md}",          text: "" },
+  verifier:     { source: "override", ref: "", text: "审查修复的最小 diff，确认没有引入回归，并核对原始复现步骤已通过。" },
+};
+
+const EXTENSIONS = [
+  { id: "hooks",     path: "extensions/hooks.yaml",     status: "declared", runtime: "dryRunOnly",     note: "只做 dry-run" },
+  { id: "skills",    path: "extensions/skills.yaml",    status: "declared", runtime: "notImplemented", note: "归宿主，只读适配" },
+  { id: "mcp",       path: "extensions/mcp.yaml",       status: "declared", runtime: "notImplemented", note: "归宿主，只读适配" },
+  { id: "knowledge", path: "extensions/knowledge.yaml", status: "declared", runtime: "searchOnly",     note: "仅 list / search" },
+  { id: "pipeline",  path: "extensions/pipeline.yaml",  status: "declared", runtime: "dispatchOnly",   note: "v2 role 派发" },
+];
+
+const CHANGES = [
+  { id: "manifest-3", action: "opencode sync-agents", time: "2 小时前", target: "~/.config/opencode.local.json", consumed: false, files: 4 },
+  { id: "manifest-2", action: "pipeline registry 更新", time: "1 天前", target: "extensions/pipeline.yaml", consumed: false, files: 1 },
+  { id: "manifest-1", action: "install --force", time: "3 天前", target: "~/.orchAgent/", consumed: true, files: 12 },
+];
+
+/* ============ 状态 ============ */
+let roleEditing = null;      // 当前编辑的 role id，'__new__' 表示新建
+let promptEditing = null;    // 当前编辑 prompt 的 role id
+let promptMode = "spec";
+let dirty = false;
+let conflictPending = null;  // { type, target }
+let saveCount = 0;           // 用于演示第二次保存触发冲突
+
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
+
+/* ============ 工具 ============ */
+function esc(s) { return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+function toast(title, desc) {
+  const t = $("#toast");
+  t.innerHTML = `<div class="t">${esc(title)}</div>${desc ? `<div class="d">${esc(desc)}</div>` : ""}`;
+  t.classList.add("show");
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.classList.remove("show"), 2600);
+}
+
+function setSync(state) {
+  const pill = $("#sync-pill"), label = $("#sync-label");
+  pill.className = "sync-pill " + state;
+  label.textContent = state === "dirty" ? "未保存更改" : state === "saved" ? "已保存" : "已同步";
+}
+
+function markDirty() { dirty = true; setSync("dirty"); }
+
+/* ============ 导航 ============ */
+const VIEW_META = {
+  runtime:     ["Runtime Status", "运行时总览与健康状态"],
+  workflow:    ["Workflow Graph", "流水线：阶段 + 门禁 + 回退边"],
+  roles:       ["Roles", "角色声明（不含凭证）"],
+  prompts:     ["Prompts", "提示词来源与编辑"],
+  extensions:  ["Extensions", "五类扩展声明"],
+  credentials: ["Host Resolution", "宿主解析状态"],
+  changes:     ["Changes & Rollback", "变更历史与回滚"],
+};
+
+function switchView(name) {
+  $$(".nav-item").forEach(n => n.classList.toggle("active", n.dataset.view === name));
+  $$(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
+  $("#topbar-title").textContent = VIEW_META[name][0];
+  $("#topbar-sub").textContent = VIEW_META[name][1];
+}
+
+document.addEventListener("click", (e) => {
+  const item = e.target.closest(".nav-item");
+  if (item) switchView(item.dataset.view);
+});
+
+function toggleSidebar() {
+  document.querySelector(".app").classList.toggle("collapsed");
+}
+
+/* ============ 加载骨架 ============ */
+function doReload() {
+  const sk = $("#skeleton");
+  sk.classList.remove("hidden");
+  setTimeout(() => { sk.classList.add("hidden"); toast("已重新加载", "运行时状态已刷新"); }, 900);
+}
+// 首屏骨架
+setTimeout(() => $("#skeleton").classList.add("hidden"), 900);
+
+/* ============ Workflow Graph SVG ============ */
+function renderWorkflow() {
+  const svg = $("#wf-svg");
+  const NS = "http://www.w3.org/2000/svg";
+
+  const stages = [
+    { id: "investigate", role: "investigator", x: 24,  cx: 99,  ma: 2 },
+    { id: "repro",       role: "investigator", x: 214, cx: 289, ma: 3 },
+    { id: "fix",         role: "fixer",        x: 404, cx: 479, ma: 3, current: true },
+    { id: "verify",      role: "verifier",     x: 594, cx: 669, ma: 3 },
+  ];
+  const gates = [
+    { id: "gate-investigate-evidence", x: 24  },
+    { id: "gate-repro-red-capable",    x: 214 },
+    { id: "gate-fix-implementation",   x: 404 },
+    { id: "gate-verify-regression",    x: 594 },
+  ];
+  const SW = 150, SH = 58, GW = 150, GH = 40;
+  const stageY = 28, gateY = 170;
+
+  function el(tag, attrs) {
+    const n = document.createElementNS(NS, tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    return n;
+  }
+
+  function rect(x, y, w, h, r, fill, stroke, sw) {
+    return el("rect", { x, y, width: w, height: h, rx: r, fill, stroke, "stroke-width": sw || 1 });
+  }
+  function text(x, y, str, color, size, weight, anchor) {
+    const t = el("text", { x, y, fill: color, "font-size": size, "font-family": "var(--font-mono)", "font-weight": weight || 500, "text-anchor": anchor || "middle" });
+    t.textContent = str;
+    return t;
+  }
+  function line(x1, y1, x2, y2, stroke, dash) {
+    return el("line", { x1, y1, x2, y2, stroke, "stroke-width": 1.6, "stroke-dasharray": dash || "" });
+  }
+  function path(d, stroke, dash, arrow) {
+    const p = el("path", { d, fill: "none", stroke, "stroke-width": 1.6, "stroke-dasharray": dash || "" });
+    if (arrow) p.setAttribute("marker-end", arrow);
+    return p;
+  }
+
+  // 箭头 markers
+  const defs = el("defs", {});
+  const mkGreen = el("marker", { id: "arr-green", viewBox: "0 0 10 10", refX: 8, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto" });
+  mkGreen.appendChild(el("path", { d: "M0 0 L10 5 L0 10 z", fill: "var(--success)" }));
+  const mkRed = el("marker", { id: "arr-red", viewBox: "0 0 10 10", refX: 8, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto" });
+  mkRed.appendChild(el("path", { d: "M0 0 L10 5 L0 10 z", fill: "var(--danger)" }));
+  defs.appendChild(mkGreen); defs.appendChild(mkRed);
+  svg.appendChild(defs);
+
+  // stage 节点
+  stages.forEach(s => {
+    const cur = s.current;
+    const fill = cur ? "var(--accent-weak)" : "var(--surface-2)";
+    const stroke = cur ? "var(--accent)" : "var(--border-strong)";
+    const sw = cur ? 1.8 : 1.4;
+    svg.appendChild(rect(s.x, stageY, SW, SH, 12, fill, stroke, sw));
+    svg.appendChild(text(s.cx, stageY + 24, s.id, cur ? "var(--accent)" : "var(--text)", 13, 650));
+    svg.appendChild(text(s.cx, stageY + 44, "role: " + s.role + " · ×" + s.ma, "var(--text-2)", 11, 500));
+    if (cur) {
+      svg.appendChild(text(s.cx, stageY - 10, "当前", "var(--accent)", 11, 600));
+    }
+  });
+
+  // terminal 节点（succeeded）
+  const termX = 780, termY = stageY + 13;
+  svg.appendChild(rect(termX, termY, 32, 32, 16, "var(--success-weak)", "var(--success)", 1.6));
+  svg.appendChild(el("path", { d: "M790 58 l6 6 l10 -12", stroke: "var(--success)", "stroke-width": 2.2, fill: "none", "stroke-linecap": "round", "stroke-linejoin": "round" }));
+  svg.appendChild(text(termX + 16, stageY + 64, "succeeded", "var(--success)", 11, 600));
+
+  // pass 边（stage → stage，水平绿箭头）
+  const passPairs = [[174, 289], [364, 479], [554, 669], [744, 790]];
+  passPairs.forEach(([x1, x2]) => {
+    svg.appendChild(path(`M${x1} ${stageY + SH/2} L${x2 - 8} ${stageY + SH/2}`, "var(--success)", "", "url(#arr-green)"));
+  });
+
+  // gate 节点 + stage→gate 竖线
+  gates.forEach((g, i) => {
+    const s = stages[i];
+    svg.appendChild(line(s.cx, stageY + SH, s.cx, gateY, "var(--text-3)"));
+    svg.appendChild(rect(g.x, gateY, GW, GH, 8, "var(--input-bg)", "var(--border)", 1));
+    svg.appendChild(text(s.cx, gateY + 23, g.id, "var(--text-2)", 10, 500));
+  });
+
+  // fail 边
+  // investigate → 终止
+  svg.appendChild(path(`M99 ${gateY+GH} L99 262`, "var(--danger)", "5 4", "url(#arr-red)"));
+  svg.appendChild(el("circle", { cx: 99, cy: 268, r: 5, fill: "none", stroke: "var(--danger)", "stroke-width": 1.6 }));
+  svg.appendChild(text(99, 284, "终止", "var(--danger)", 10, 600));
+  // repro → 终止
+  svg.appendChild(path(`M289 ${gateY+GH} L289 262`, "var(--danger)", "5 4", "url(#arr-red)"));
+  svg.appendChild(el("circle", { cx: 289, cy: 268, r: 5, fill: "none", stroke: "var(--danger)", "stroke-width": 1.6 }));
+  svg.appendChild(text(289, 284, "终止", "var(--danger)", 10, 600));
+  // fix → fix（自环 retry）
+  svg.appendChild(path(`M554 ${gateY+GH} L554 246 L622 246 L622 ${gateY+GH}`, "var(--danger)", "5 4", ""));
+  svg.appendChild(text(622, 254, "retry fix", "var(--danger)", 10, 500));
+  svg.appendChild(text(622, 268, "", "var(--danger)", 10, 500));
+  // verify → repro（长回退）
+  svg.appendChild(path(`M669 ${gateY+GH} L669 296 L289 296 L289 ${gateY+GH}`, "var(--danger)", "5 4", "url(#arr-red)"));
+  svg.appendChild(text(480, 294, "fail → 回退 repro", "var(--danger)", 10, 500));
+
+  // 标注 fail 边起点标签
+  svg.appendChild(text(60, gateY + GH + 12, "fail", "var(--danger)", 9, 600));
+}
+
+/* ============ Roles 视图 ============ */
+function renderRoles() {
+  const body = $("#role-body");
+  body.innerHTML = ROLES.map(r => `
+    <tr>
+      <td class="mono" style="font-weight:600">${esc(r.id)}</td>
+      <td class="mono" style="color:var(--text-2)">${esc(r.provider)}</td>
+      <td class="mono" style="color:var(--text-2)">${esc(r.model)}</td>
+      <td style="color:var(--text-2)">${esc(r.description)}</td>
+      <td style="text-align:right"><button class="ghost btn-sm" onclick="editRole('${r.id}')">编辑</button></td>
+    </tr>
+  `).join('');
+}
+
+function roleForm(role) {
+  const r = role || { id: "", provider: "", model: "", description: "" };
+  const isNew = role === null;
+  return `
+    <div class="field">
+      <label>id</label>
+      <input id="role-f-id" value="${esc(r.id)}" oninput="markDirty()" placeholder="例如 fixer">
+      <div class="err-msg" id="role-id-err">id 必须匹配 [A-Za-z0-9][A-Za-z0-9._-]*</div>
+    </div>
+    <div class="field">
+      <label>provider</label>
+      <input id="role-f-provider" value="${esc(r.provider)}" oninput="markDirty()" placeholder="例如 glm">
+    </div>
+    <div class="field">
+      <label>model</label>
+      <input id="role-f-model" value="${esc(r.model)}" oninput="markDirty()" placeholder="例如 glm-5.2">
+    </div>
+    <div class="field">
+      <label>description</label>
+      <input id="role-f-desc" value="${esc(r.description)}" oninput="markDirty()" placeholder="一句话描述该角色职责">
+    </div>
+    <div style="font-size:var(--fs-xs);color:var(--text-3);margin-bottom:14px">
+      凭证字段（api_key / key / token / secret / env）一律拒收，本表单不提供此类输入。
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:10px">
+      <button class="ghost" onclick="resetRole()">还原</button>
+      <button onclick="saveRole()">${isNew ? "创建 role" : "保存 role"}</button>
+    </div>
+  `;
+}
+
+function editRole(id) {
+  roleEditing = id;
+  const r = ROLES.find(x => x.id === id);
+  $("#role-edit-hint").textContent = "正在编辑：" + id;
+  $("#role-edit-body").innerHTML = roleForm(r);
+}
+
+function newRole() {
+  roleEditing = "__new__";
+  $("#role-edit-hint").textContent = "新建 role";
+  $("#role-edit-body").innerHTML = roleForm(null);
+}
+
+function validateRoleField() {
+  const v = $("#role-f-id").value.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(v)) {
+    $("#role-f-id").closest(".field").classList.add("invalid");
+    return false;
+  }
+  $("#role-f-id").closest(".field").classList.remove("invalid");
+  return true;
+}
+
+function resetRole() {
+  if (roleEditing === "__new__") {
+    $("#role-edit-body").innerHTML = roleForm(null);
+  } else if (roleEditing) {
+    const r = ROLES.find(x => x.id === roleEditing);
+    $("#role-edit-body").innerHTML = roleForm(r);
+  }
+  toast("已还原", "恢复为已保存值");
+}
+
+function saveRole() {
+  if (!validateRoleField()) { toast("校验失败", "role id 格式非法，无法保存"); return; }
+  const id = $("#role-f-id").value.trim();
+  const provider = $("#role-f-provider").value.trim();
+  const model = $("#role-f-model").value.trim();
+  const description = $("#role-f-desc").value.trim();
+
+  if (roleEditing === "__new__" && ROLES.some(x => x.id === id)) {
+    toast("创建失败", "role id 已存在：" + id);
+    return;
+  }
+
+  // 演示：第二次保存触发冲突
+  saveCount++;
+  if (saveCount === 2 && roleEditing !== "__new__") {
+    openConflict(roleEditing);
+    return;
+  }
+
+  if (roleEditing === "__new__") {
+    ROLES.push({ id, provider, model, description });
+    toast("✅ role 已创建", id + " → " + provider + " / " + model);
+  } else {
+    const r = ROLES.find(x => x.id === roleEditing);
+    const oldId = r.id;
+    r.id = id; r.provider = provider; r.model = model; r.description = description;
+    toast("✅ role 已保存", oldId + " → " + provider + " / " + model);
+  }
+  dirty = false; setSync("saved");
+  setTimeout(() => setSync("clean"), 2000);
+  renderRoles();
+  roleEditing = id;
+  $("#role-edit-hint").textContent = "正在编辑：" + id;
+  $("#role-edit-body").innerHTML = roleForm(ROLES.find(x => x.id === id));
+}
+
+/* ============ Prompts 视图 ============ */
+function renderPrompts() {
+  const body = $("#prompt-body");
+  body.innerHTML = Object.entries(PROMPTS).map(([id, p]) => {
+    const badge = p.source === "spec"
+      ? '<span class="badge accent"><span class="dot"></span>spec</span>'
+      : '<span class="badge warn"><span class="dot"></span>override</span>';
+    const show = p.source === "spec" ? `<code class="mono" style="color:var(--text-2)">${esc(p.ref)}</code>` : `<code class="mono" style="color:var(--text-2)">${esc(p.text.slice(0, 40))}…</code>`;
+    return `<tr>
+      <td class="mono">${esc(id)}</td>
+      <td>${badge}</td>
+      <td>${show}</td>
+      <td style="text-align:right"><button class="ghost btn-sm" onclick="editPrompt('${id}')">编辑</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function editPrompt(id) {
+  promptEditing = id;
+  const p = PROMPTS[id];
+  promptMode = p.source;
+  $("#prompt-edit-hint").textContent = "正在编辑：" + id;
+  $("#prompt-textarea").value = p.text;
+  applyPromptModeUI();
+}
+
+function setPromptMode(mode) {
+  promptMode = mode;
+  applyPromptModeUI();
+  markDirty();
+}
+
+function applyPromptModeUI() {
+  const spec = promptMode === "spec";
+  $("#prompt-spec-info").style.display = spec ? "flex" : "none";
+  $("#prompt-textarea-field").style.display = spec ? "none" : "block";
+  if (spec && promptEditing) {
+    $("#prompt-spec-ref").innerHTML = `<code class="mono">${esc(PROMPTS[promptEditing].ref)}</code>`;
+  }
+  $$("#prompt-mode button").forEach(b => {
+    const on = b.dataset.pm === promptMode;
+    b.className = on ? "btn-sm" : "ghost btn-sm";
+  });
+}
+
+function resetPromptEdit() {
+  if (!promptEditing) return;
+  const p = PROMPTS[promptEditing];
+  promptMode = p.source;
+  $("#prompt-textarea").value = p.text;
+  applyPromptModeUI();
+}
+
+function savePrompt() {
+  if (!promptEditing) { toast("未选择角色", "请先在表格中选择要编辑的角色"); return; }
+  PROMPTS[promptEditing].source = promptMode;
+  PROMPTS[promptEditing].text = promptMode === "spec" ? "" : $("#prompt-textarea").value.trim();
+  dirty = false; setSync("saved");
+  toast("✅ prompt 已保存", promptEditing + " · " + (promptMode === "spec" ? "默认 spec" : "本地覆盖"));
+  setTimeout(() => setSync("clean"), 2000);
+  renderPrompts();
+}
+
+/* ============ Extensions 视图 ============ */
+function renderExtensions() {
+  const card = $("#ext-card");
+  card.innerHTML = `
+    <div class="table-scroll">
+    <table class="table">
+      <thead><tr><th>扩展</th><th>路径</th><th>状态</th><th>运行时</th><th>说明</th></tr></thead>
+      <tbody>
+        ${EXTENSIONS.map(e => {
+          const st = e.status === "declared" ? '<span class="badge ok"><span class="dot"></span>declared</span>'
+                   : '<span class="badge err"><span class="dot"></span>error</span>';
+          const rt = e.runtime === "dispatchOnly" ? '<span class="badge accent"><span class="dot"></span>dispatchOnly</span>'
+                   : e.runtime === "notImplemented" ? '<span class="badge muted">notImplemented</span>'
+                   : '<span class="badge warn"><span class="dot"></span>' + e.runtime + '</span>';
+          return `<tr>
+            <td class="mono">${esc(e.id)}</td>
+            <td class="mono" style="color:var(--text-2)">${esc(e.path)}</td>
+            <td>${st}</td>
+            <td>${rt}</td>
+            <td style="color:${e.status === 'error' ? 'var(--danger)' : 'var(--text-2)'}">${esc(e.note)}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+    </div>
+  `;
+}
+
+/* ============ Changes 视图 ============ */
+function renderChanges() {
+  const card = $("#changes-card");
+  if (CHANGES.length === 0) {
+    card.innerHTML = `
+      <div class="state-box">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg></div>
+        <div class="t">暂无变更记录</div>
+        <div class="d">尚未执行任何写入操作</div>
+      </div>`;
+    return;
+  }
+  const rows = CHANGES.map(c => {
+    const st = c.consumed
+      ? '<span class="badge muted">consumed</span>'
+      : '<span class="badge ok"><span class="dot"></span>pending</span>';
+    const actions = c.consumed
+      ? '<span style="color:var(--text-3);font-size:var(--fs-xs)">已消费，不可回滚</span>'
+      : `<button class="ghost btn-sm" onclick="showDiff('${c.id}')">查看 diff</button>
+         <button class="danger btn-sm" onclick="doRollback('${c.id}')" style="margin-left:8px">回滚</button>`;
+    return `
+      <tr>
+        <td class="mono" style="font-weight:600">${esc(c.id)}</td>
+        <td style="color:var(--text-2)">${esc(c.action)}</td>
+        <td class="mono" style="color:var(--text-2)">${esc(c.target)}</td>
+        <td>${st}</td>
+        <td style="color:var(--text-3);font-size:var(--fs-xs);white-space:nowrap">${esc(c.time)}</td>
+        <td style="text-align:right;white-space:nowrap">${actions}</td>
+      </tr>
+      <tr class="diff-row" id="diff-row-${c.id}" style="display:none">
+        <td colspan="6" style="padding:0 16px 14px"><div class="diff" id="diff-${c.id}"></div></td>
+      </tr>`;
+  }).join('');
+  card.innerHTML = `
+    <div class="table-scroll">
+      <table class="table">
+        <thead><tr><th>ID</th><th>Action</th><th>Target</th><th>Status</th><th>Time</th><th style="text-align:right">Actions</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="padding:12px 16px;border-top:1px solid var(--border);font-size:var(--fs-xs);color:var(--text-3)">
+      每次写入生成 rollback manifest，回滚一次性消费（consumed 后不可再次回滚）。
+    </div>`;
+}
+
+function showDiff(id) {
+  const row = $("#diff-row-" + id);
+  const box = $("#diff-" + id);
+  if (row.style.display === "none") {
+    box.innerHTML = diffSample(id);
+    row.style.display = "table-row";
+  } else {
+    row.style.display = "none";
+  }
+}
+
+function diffSample(id) {
+  return `
+    <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--input-bg)">
+      <div class="dl add"><span class="mark">+</span><span class="n">1</span><span class="code">"version": 2,</span></div>
+      <div class="dl add"><span class="mark">+</span><span class="n">2</span><span class="code">"roles": [ … ],</span></div>
+      <div class="dl"><span class="mark">&nbsp;</span><span class="n">3</span><span class="code">"pipelines": [</span></div>
+      <div class="dl del"><span class="mark">-</span><span class="n">4</span><span class="code">  "revision": "0",</span></div>
+      <div class="dl add"><span class="mark">+</span><span class="n">4</span><span class="code">  "revision": "1",</span></div>
+      <div class="dl"><span class="mark">&nbsp;</span><span class="n">5</span><span class="code">  "route": { "taskTypes": ["bug"], "priority": 10 }</span></div>
+    </div>`;
+}
+
+function doRollback(id) {
+  const c = CHANGES.find(x => x.id === id);
+  c.consumed = true;
+  toast("↺ 已回滚", c.id + " 已消费，恢复到写入前状态");
+  renderChanges();
+}
+
+/* ============ 冲突处理 ============ */
+function openConflict(target) {
+  conflictPending = { target };
+  $("#conflict-target").textContent = target;
+  $("#conflict-modal").classList.add("open");
+}
+function closeConflict() {
+  $("#conflict-modal").classList.remove("open");
+  conflictPending = null;
+}
+function resolveConflict(overwrite) {
+  $("#conflict-modal").classList.remove("open");
+  if (overwrite && conflictPending) {
+    const id = conflictPending.target;
+    const r = ROLES.find(x => x.id === id);
+    if (r) {
+      r.id = $("#role-f-id").value.trim();
+      r.provider = $("#role-f-provider").value.trim();
+      r.model = $("#role-f-model").value.trim();
+      r.description = $("#role-f-desc").value.trim();
+    }
+    dirty = false; setSync("saved");
+    toast("⚠ 已覆盖保存", "已忽略他人改动并写入本地值");
+    setTimeout(() => setSync("clean"), 2000);
+    renderRoles();
+    if (r) {
+      roleEditing = r.id;
+      $("#role-edit-hint").textContent = "正在编辑：" + r.id;
+      $("#role-edit-body").innerHTML = roleForm(r);
+    }
+  } else {
+    toast("已放弃", "本次修改未保存");
+  }
+  conflictPending = null;
+}
+
+/* ============ 初始化 ============ */
+renderWorkflow();
+renderRoles();
+renderPrompts();
+renderExtensions();
+renderChanges();
+applyPromptModeUI();
+</script>
+</body>
+</html>

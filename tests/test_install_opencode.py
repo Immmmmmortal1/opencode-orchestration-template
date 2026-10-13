@@ -32,6 +32,8 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(7, len(copied))
         for dirname in RUNTIME_DIRS:
             self.assertTrue((self.env.home / dirname).is_dir())
+        self.assertTrue((self.env.home / "prompts/templates").is_dir())
+        self.assertTrue((self.env.home / "prompts/overrides").is_dir())
         manifest = self.env.home / "install-manifest.json"
         self.assertTrue(manifest.is_file())
 
