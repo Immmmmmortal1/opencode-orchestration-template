@@ -70,6 +70,13 @@
     `pipeline route` 按 `route.taskTypes/priority` 确定性选择 id+revision；route 不建 session，run 用
     `--pipeline-revision` 固定版本并持久化 task type；`sync-agents` 同步生成 `orchagent-role-*` subagents
   - v1 语义**保留可用**但**不是前进方向**，由 `version` 与 v2 区分、不混用
+- **旧安装迁移（2026-10-14）**：`copy_default_configs` 新增 `migrate` 开关（默认 `False`，
+  既有行为不变）；CLI `install` 传 `migrate=True`，对**已存在**的 `orchAgent.yaml` 只补
+  模板中**缺失**的 `extensions.*` 键（不覆盖用户已有值），写前备份进同一 backup 目录并登记
+  rollback manifest，幂等；配置解析失败则安全跳过
+  - 根因：安装器是「缺文件才复制」，对已存在的主配置永远跳过，导致新增 extension 键（如
+    `pipeline`）在旧安装中永远补不上，`config validate` 永久 `missing extensions.pipeline`
+  - 影响面：旧安装无法使用 `bugfix` 等新流水线（`pipeline direct-run` 报 `pipeline_registry_invalid`）
 - 未实现：skills/MCP runtime、knowledge 索引
 - Phase 3B 的分期与状态**以 [`docs/capability-seams.md`](docs/capability-seams.md) §9 为唯一来源**（此处不重复断言）
 - Phase 3B-0（**仅文档**）：`docs/capability-seams.md`（参考 DeepSeek Harness 的 **capability seam**
@@ -98,6 +105,8 @@ python3 -m unittest discover -s tests
 - [ ] **方向调整（2026-10-08）**：skill / MCP 归宿主（opencode / codex）机制，**编排层不关心**。3B-1 skill seam 已撤销（`v0.9.1`）。编排层聚焦 **agent 编排** → **已按 v2 role 派发模型落实（v0.10.0，D14）**
 - [ ] 3B-0 的 capability seam 设计（`docs/capability-seams.md` / D13）是否同步退役 —— 待用户定
 - [x] Phase 3C：第一条真实流水线 + Jev 分类 / 确定性路由（见 `pipeline.md` §8）
+- [x] 旧安装迁移：补齐缺失 `extensions` 键，`bugfix` 工作流在本机 `~/.orchAgent` 端到端跑通
+      （`run status: succeeded`，4 阶段 gate 全 pass）
 
 ## 开发流程约束
 
