@@ -70,7 +70,12 @@ def write_rendered_template(src: Path, dst: Path, home: Path) -> None:
     os.chmod(dst, 0o600)
 
 
-def copy_default_configs(home: Path = DEFAULT_HOME, overwrite: bool = False, link_bin: str | None = None) -> list[str]:
+def copy_default_configs(
+    home: Path = DEFAULT_HOME,
+    overwrite: bool = False,
+    link_bin: str | None = None,
+    migrate: bool = False,
+) -> list[str]:
     if link_bin:
         link_path = Path(link_bin).expanduser()
         source = PROJECT_ROOT / "bin" / "orchagent"
@@ -106,6 +111,40 @@ def copy_default_configs(home: Path = DEFAULT_HOME, overwrite: bool = False, lin
             manifest_entries.append({"type": "file", "target": str(dst), "backup": "", "existed": False})
         write_rendered_template(src, dst, home)
         copied.append(str(dst))
+
+    main_config_path = home / "orchAgent.yaml"
+    if migrate and main_config_path.exists():
+        try:
+            config = json.loads(main_config_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            config = None
+        if isinstance(config, dict) and isinstance(config.get("extensions"), dict):
+            template_config = json.loads(render_template(template_path("orchAgent.yaml"), home))
+            template_extensions = template_config["extensions"]
+            missing_extensions = {
+                key: value
+                for key, value in template_extensions.items()
+                if key not in config["extensions"]
+            }
+            if missing_extensions:
+                backup_path = backup_dir / "orchAgent.yaml"
+                shutil.copyfile(main_config_path, backup_path)
+                os.chmod(backup_path, 0o600)
+                manifest_entries.append(
+                    {
+                        "type": "file",
+                        "target": str(main_config_path),
+                        "backup": str(backup_path),
+                        "existed": True,
+                    }
+                )
+                config["extensions"].update(missing_extensions)
+                main_config_path.write_text(
+                    json.dumps(config, indent=2, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+                os.chmod(main_config_path, 0o600)
+                copied.append(str(main_config_path))
 
     install_manifest_path = home / "install-manifest.json"
     if install_manifest_path.exists():

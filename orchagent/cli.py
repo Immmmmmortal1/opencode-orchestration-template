@@ -38,7 +38,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         except Exception as exc:  # noqa: BLE001
             print_json({"status": "error", "message": str(exc)})
             return 1
-    copied = copy_default_configs(DEFAULT_HOME, overwrite=args.force, link_bin=args.link_bin)
+    copied = copy_default_configs(DEFAULT_HOME, overwrite=args.force, link_bin=args.link_bin, migrate=True)
     print_json({"status": "ok", "home": str(DEFAULT_HOME), "copied": copied})
     return 0
 

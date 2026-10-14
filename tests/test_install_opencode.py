@@ -7,14 +7,17 @@ from pathlib import Path
 from unittest.mock import patch
 
 from orchagent.backup import create_backup_dir
+from orchagent.config import validate_all
 from orchagent.install import (
     RUNTIME_DIRS,
     backup_root,
     copy_default_configs,
     latest_backup_dir,
+    render_template,
     rollback_latest,
 )
 from orchagent.opencode import backup_files
+from orchagent.paths import template_path
 
 from tests.helpers import IsolatedEnv
 
@@ -25,6 +28,15 @@ class InstallTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.env.tearDown()
+
+    def write_legacy_config(self, *, hooks: str | None = None) -> bytes:
+        config = json.loads(render_template(template_path("orchAgent.yaml"), self.env.home))
+        del config["extensions"]["pipeline"]
+        if hooks is not None:
+            config["extensions"]["hooks"] = hooks
+        original = (json.dumps(config, indent=2, ensure_ascii=False) + "\n").encode()
+        (self.env.home / "orchAgent.yaml").write_bytes(original)
+        return original
 
     def test_install_is_idempotent_and_force_controls_overwrite(self) -> None:
         copied = self.env.install_home()
@@ -47,6 +59,60 @@ class InstallTests(unittest.TestCase):
         overwritten = copy_default_configs(self.env.home, overwrite=True)
         self.assertEqual(7, len(overwritten))
         self.assertNotEqual(sentinel, main_config.read_bytes())
+
+    def test_install_migrates_missing_pipeline_extension_and_validates(self) -> None:
+        self.write_legacy_config()
+
+        copied = copy_default_configs(self.env.home, migrate=True)
+
+        config = json.loads((self.env.home / "orchAgent.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(
+            str(self.env.home / "extensions" / "pipeline.yaml"),
+            config["extensions"]["pipeline"],
+        )
+        self.assertTrue((self.env.home / "extensions" / "pipeline.yaml").is_file())
+        self.assertIn(str(self.env.home / "orchAgent.yaml"), copied)
+        self.assertEqual([], validate_all(self.env.home))
+
+    def test_install_migration_preserves_custom_extension_values(self) -> None:
+        custom_hooks = str(self.env.external_dir / "custom-hooks.yaml")
+        self.write_legacy_config(hooks=custom_hooks)
+
+        copy_default_configs(self.env.home, migrate=True)
+
+        config = json.loads((self.env.home / "orchAgent.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(custom_hooks, config["extensions"]["hooks"])
+        self.assertEqual(
+            str(self.env.home / "extensions" / "pipeline.yaml"),
+            config["extensions"]["pipeline"],
+        )
+
+    def test_install_migration_is_idempotent(self) -> None:
+        self.write_legacy_config()
+        copy_default_configs(self.env.home, migrate=True)
+        config_path = self.env.home / "orchAgent.yaml"
+        migrated = config_path.read_bytes()
+
+        copied = copy_default_configs(self.env.home, migrate=True)
+
+        self.assertEqual([], copied)
+        self.assertEqual(migrated, config_path.read_bytes())
+
+    def test_install_without_migration_preserves_legacy_config(self) -> None:
+        original = self.write_legacy_config()
+
+        copy_default_configs(self.env.home)
+
+        self.assertEqual(original, (self.env.home / "orchAgent.yaml").read_bytes())
+        self.assertIn("missing extensions.pipeline", validate_all(self.env.home))
+
+    def test_install_rollback_restores_config_before_migration(self) -> None:
+        original = self.write_legacy_config()
+        copy_default_configs(self.env.home, migrate=True)
+
+        rollback_latest(self.env.home, kind="install")
+
+        self.assertEqual(original, (self.env.home / "orchAgent.yaml").read_bytes())
 
     def test_backup_root_is_sibling_of_home(self) -> None:
         self.env.install_home()
