@@ -197,8 +197,6 @@
   .badge .dot { width: 6px; height: 6px; }
   .badge.ok { background: var(--success-weak); color: var(--success); }
   .badge.warn { background: var(--warning-weak); color: var(--warning); }
-  .badge.err { background: var(--danger-weak); color: var(--danger); }
-  .badge.muted { background: rgba(255,255,255,.05); color: var(--text-2); }
   .badge.accent { background: var(--accent-weak); color: var(--accent); }
 
   .tag {
@@ -206,16 +204,6 @@
     padding: 2px 7px; border-radius: 5px; font-family: var(--font-mono); line-height: 1.4;
     background: rgba(255,255,255,.05); color: var(--text-2);
   }
-
-  /* ============ 指标卡（Runtime 总览） ============ */
-  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-  .metric {
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
-    padding: 16px;
-  }
-  .metric .label { font-size: var(--fs-xs); color: var(--text-3); margin-bottom: 8px; }
-  .metric .value { font-size: var(--fs-xl); font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-  .metric .sub { font-size: var(--fs-xs); color: var(--text-2); margin-top: 4px; }
 
   /* ============ 表格 ============ */
   .table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
@@ -234,18 +222,6 @@
   .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .table-scroll .table { min-width: 640px; }
 
-  /* ============ 演示数据提示 ============ */
-  .demo-note {
-    display: flex; align-items: flex-start; gap: 10px;
-    background: rgba(255,255,255,.04); border: 1px solid var(--border);
-    border-radius: var(--r); padding: 12px 14px; color: var(--text-2);
-    margin-bottom: 16px;
-  }
-  .demo-note .ico { flex-shrink: 0; margin-top: 1px; }
-  .demo-note .ico svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-  .demo-note .t { font-weight: 600; color: var(--text); font-size: var(--fs-sm); }
-  .demo-note .d { font-size: var(--fs-xs); margin-top: 2px; }
-
   /* ============ 侧栏折叠 / 窄屏 ============ */
   .app { transition: grid-template-columns .15s ease; }
   .app.collapsed { grid-template-columns: 64px 1fr; }
@@ -262,8 +238,6 @@
   @media (max-width: 1024px) {
     .content { padding: 16px 16px 48px; }
     .topbar { padding: 0 16px; }
-    .metrics { grid-template-columns: repeat(2, 1fr); }
-    .kv { grid-template-columns: 110px 1fr; }
   }
 
   /* ============ Workflow Graph ============ */
@@ -288,13 +262,6 @@
   .field.invalid input { border-color: var(--danger); }
   .field.invalid .err-msg { display: block; }
 
-  /* ============ 空/错误状态 ============ */
-  .state-box { padding: 40px 16px; text-align: center; color: var(--text-3); }
-  .state-box .ico { width: 32px; height: 32px; margin: 0 auto 12px; color: var(--text-3); }
-  .state-box .ico svg { width: 100%; height: 100%; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-  .state-box .t { font-size: var(--fs-sm); color: var(--text-2); }
-  .state-box .d { font-size: var(--fs-xs); margin-top: 4px; }
-
   .error-banner {
     display: flex; align-items: flex-start; gap: 10px;
     background: var(--danger-weak); border: 1px solid rgba(224,85,78,.25);
@@ -304,17 +271,6 @@
   .error-banner .ico svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
   .error-banner .t { font-weight: 600; font-size: var(--fs-sm); }
   .error-banner .d { font-size: var(--fs-xs); color: var(--text-2); margin-top: 2px; }
-
-  /* ============ Diff ============ */
-  .diff { font-family: var(--font-mono); font-size: 12px; line-height: 1.6; }
-  .diff .dl { display: flex; padding: 1px 12px; }
-  .diff .dl .n { width: 32px; flex-shrink: 0; color: var(--text-3); text-align: right; padding-right: 10px; user-select: none; }
-  .diff .dl.add { background: rgba(63,185,126,.10); }
-  .diff .dl.add .mark { color: var(--success); }
-  .diff .dl.del { background: rgba(224,85,78,.10); }
-  .diff .dl.del .mark { color: var(--danger); }
-  .diff .dl .code { white-space: pre-wrap; word-break: break-all; }
-  .diff .dl .mark { width: 14px; flex-shrink: 0; }
 
   /* ============ Toast ============ */
   .toast {
@@ -356,9 +312,6 @@
   @keyframes pulse { 0%,100% { opacity: .4; } 50% { opacity: .8; } }
   .sk-line { animation: pulse 1.2s ease-in-out infinite; }
 
-  .kv { display: grid; grid-template-columns: 130px 1fr; gap: 8px 16px; font-size: var(--fs-sm); }
-  .kv .k { color: var(--text-3); font-size: var(--fs-xs); padding-top: 2px; }
-  .kv .v { font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
 </style>
 </head>
 <body>
@@ -377,16 +330,8 @@
 
     <nav class="nav">
       <div class="nav-group">
-        <div class="nav-group-label">概览</div>
-        <div class="nav-item active" data-view="runtime">
-          <svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>
-          Runtime Status
-        </div>
-      </div>
-
-      <div class="nav-group">
         <div class="nav-group-label">编排</div>
-        <div class="nav-item" data-view="workflow">
+        <div class="nav-item active" data-view="workflow">
           <svg viewBox="0 0 24 24"><path d="M6 3v3"/><path d="M6 6a3 3 0 0 0 3 3h6a3 3 0 0 1 3 3v3"/><path d="M6 6a3 3 0 0 1-3 3v6a3 3 0 0 0 3 3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/></svg>
           Workflow Graph
         </div>
@@ -398,27 +343,6 @@
         <div class="nav-item" data-view="prompts">
           <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg>
           Prompts
-        </div>
-      </div>
-
-      <div class="nav-group">
-        <div class="nav-group-label">配置</div>
-        <div class="nav-item" data-view="extensions">
-          <svg viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-          Extensions
-          <span class="nav-badge">5</span>
-        </div>
-        <div class="nav-item" data-view="credentials">
-          <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-          Host Resolution
-        </div>
-      </div>
-
-      <div class="nav-group">
-        <div class="nav-group-label">运维</div>
-        <div class="nav-item" data-view="changes">
-          <svg viewBox="0 0 24 24"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
-          Changes &amp; Rollback
         </div>
       </div>
     </nav>
@@ -436,8 +360,8 @@
         <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
       </button>
       <div>
-        <span class="topbar-title" id="topbar-title">Runtime Status</span>
-        <span class="topbar-sub" id="topbar-sub">运行时总览与健康状态</span>
+        <span class="topbar-title" id="topbar-title">Workflow Graph</span>
+        <span class="topbar-sub" id="topbar-sub">流水线：阶段 + 门禁 + 回退边</span>
       </div>
       <div class="topbar-right">
         <span class="sync-pill clean" id="sync-pill"><span class="dot" style="width:6px;height:6px;background:currentColor"></span><span id="sync-label">已同步</span></span>
@@ -449,92 +373,8 @@
 
     <div class="content">
 
-      <!-- ======================= Runtime Status ======================= -->
-      <section class="view active" id="view-runtime">
-        <div class="page-head">
-          <div class="page-title">Runtime Status</div>
-          <div class="page-desc">orchAgent 本地运行时总览。本页为演示视图，以下数据均为 mock 示例，不反映真实运行时状态。</div>
-        </div>
-
-        <div class="demo-note">
-          <span class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg></span>
-          <div>
-            <div class="t">演示数据</div>
-            <div class="d">本页展示界面结构与信息层级；session 数、错误、变更记录均为占位示例，非真实运行时数据。</div>
-          </div>
-        </div>
-
-        <div class="metrics">
-          <div class="metric">
-            <div class="label">Config 校验</div>
-            <div class="value" style="color:var(--text-3)">—</div>
-            <div class="sub">demo 占位 · 未执行 doctor</div>
-          </div>
-          <div class="metric">
-            <div class="label">编排模式</div>
-            <div class="value">dispatch</div>
-            <div class="sub">v2 role 派发 · 不执行不碰 key</div>
-          </div>
-          <div class="metric">
-            <div class="label">活跃 Session</div>
-            <div class="value" style="color:var(--text-3)">—</div>
-            <div class="sub">demo 占位 · 无真实数据</div>
-          </div>
-          <div class="metric">
-            <div class="label">可回滚变更</div>
-            <div class="value" style="color:var(--text-3)">—</div>
-            <div class="sub">demo 占位 · 无真实记录</div>
-          </div>
-        </div>
-
-        <div class="card" style="margin-top:16px">
-          <div class="card-head">
-            <span class="t">扩展运行时能力</span>
-            <span class="hint">declared = 已索引校验；runtime 表示当前可执行的层级</span>
-            <div class="spacer"><span class="badge ok"><span class="dot"></span>5 declared</span></div>
-          </div>
-          <div class="table-scroll">
-          <table class="table">
-            <thead><tr><th>扩展</th><th>状态</th><th>运行时能力</th><th>说明</th></tr></thead>
-            <tbody>
-              <tr>
-                <td class="mono">hooks</td>
-                <td><span class="badge ok"><span class="dot"></span>declared</span></td>
-                <td><span class="badge warn"><span class="dot"></span>dryRunOnly</span></td>
-                <td style="color:var(--text-2)">只做 dry-run，不执行真实业务</td>
-              </tr>
-              <tr>
-                <td class="mono">knowledge</td>
-                <td><span class="badge ok"><span class="dot"></span>declared</span></td>
-                <td><span class="badge warn"><span class="dot"></span>searchOnly</span></td>
-                <td style="color:var(--text-2)">仅显式 list / search，不做索引</td>
-              </tr>
-              <tr>
-                <td class="mono">skills</td>
-                <td><span class="badge ok"><span class="dot"></span>declared</span></td>
-                <td><span class="badge muted">notImplemented</span></td>
-                <td style="color:var(--text-3)">归宿主机制，编排层不执行</td>
-              </tr>
-              <tr>
-                <td class="mono">mcp</td>
-                <td><span class="badge ok"><span class="dot"></span>declared</span></td>
-                <td><span class="badge muted">notImplemented</span></td>
-                <td style="color:var(--text-3)">归宿主，编排层不执行</td>
-              </tr>
-              <tr>
-                <td class="mono">pipeline</td>
-                <td><span class="badge ok"><span class="dot"></span>declared</span></td>
-                <td><span class="badge accent"><span class="dot"></span>dispatchOnly</span></td>
-                <td style="color:var(--text-2)">v2：只输出 role 派发指令</td>
-              </tr>
-            </tbody>
-          </table>
-          </div>
-        </div>
-      </section>
-
       <!-- ======================= Workflow Graph ======================= -->
-      <section class="view" id="view-workflow">
+      <section class="view active" id="view-workflow">
         <div class="page-head">
           <div class="page-title">Workflow Graph</div>
           <div class="page-desc">bugfix 流水线（v2 · revision 1）：四个阶段 + 门禁 + 回退边，阶段绑定已声明的 role。</div>
@@ -649,56 +489,6 @@
         </div>
       </section>
 
-      <!-- ======================= Extensions ======================= -->
-      <section class="view" id="view-extensions">
-        <div class="page-head">
-          <div class="page-title">Extensions</div>
-          <div class="page-desc">五类扩展统一通过配置声明：<code class="mono">hooks / skills / mcp / knowledge / pipeline</code>。</div>
-        </div>
-        <div class="card" id="ext-card"></div>
-      </section>
-
-      <!-- ======================= Host Resolution ======================= -->
-      <section class="view" id="view-credentials">
-        <div class="page-head">
-          <div class="page-title">Host Resolution</div>
-          <div class="page-desc">宿主解析状态。本页<strong>完全只读</strong>：orchAgent 不管理、不读取、不显示任何 key 或环境变量引用，仅消费宿主返回的脱敏解析结果。</div>
-        </div>
-
-        <div class="card">
-          <div class="card-head">
-            <span class="t">解析状态</span>
-            <span class="hint">resolved = 已解析可用 · unresolved = 未解析 · unknown = 未声明</span>
-            <div class="spacer"><span class="badge muted"><span class="dot"></span>read-only</span></div>
-          </div>
-          <div class="table-scroll">
-            <table class="table">
-              <thead><tr><th>Provider</th><th>解析状态</th><th>说明</th></tr></thead>
-              <tbody>
-                <tr><td class="mono">deepseek</td><td><span class="badge ok"><span class="dot"></span>resolved</span></td><td style="color:var(--text-2)">宿主已解析到非空值</td></tr>
-                <tr><td class="mono">glm</td><td><span class="badge ok"><span class="dot"></span>resolved</span></td><td style="color:var(--text-2)">宿主已解析到非空值</td></tr>
-                <tr><td class="mono">openai</td><td><span class="badge ok"><span class="dot"></span>resolved</span></td><td style="color:var(--text-2)">宿主已解析到非空值</td></tr>
-                <tr><td class="mono">qwen</td><td><span class="badge warn"><span class="dot"></span>unresolved</span></td><td style="color:var(--text-2)">宿主未解析到值</td></tr>
-                <tr><td class="mono">doubao</td><td><span class="badge muted">unknown</span></td><td style="color:var(--text-3)">未声明</td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div style="padding:12px 16px;border-top:1px solid var(--border);font-size:var(--fs-xs);color:var(--text-3)">
-            只读视图：不渲染、不请求、不持久化任何 key / 环境变量名 / 引用值；状态由宿主脱敏后返回。
-          </div>
-        </div>
-      </section>
-
-      <!-- ======================= Changes & Rollback ======================= -->
-      <section class="view" id="view-changes">
-        <div class="page-head">
-          <div class="page-title">Changes &amp; Rollback</div>
-          <div class="page-desc">变更与回滚。每次写入生成 rollback manifest，回滚一次性消费。</div>
-        </div>
-
-        <div class="card" id="changes-card"></div>
-      </section>
-
     </div><!-- /.content -->
   </div><!-- /.main -->
 </div><!-- /.app -->
@@ -751,19 +541,7 @@ const PROMPTS = {
   verifier:     { source: "override", ref: "", text: "审查修复的最小 diff，确认没有引入回归，并核对原始复现步骤已通过。" },
 };
 
-const EXTENSIONS = [
-  { id: "hooks",     path: "extensions/hooks.yaml",     status: "declared", runtime: "dryRunOnly",     note: "只做 dry-run" },
-  { id: "skills",    path: "extensions/skills.yaml",    status: "declared", runtime: "notImplemented", note: "归宿主，只读适配" },
-  { id: "mcp",       path: "extensions/mcp.yaml",       status: "declared", runtime: "notImplemented", note: "归宿主，只读适配" },
-  { id: "knowledge", path: "extensions/knowledge.yaml", status: "declared", runtime: "searchOnly",     note: "仅 list / search" },
-  { id: "pipeline",  path: "extensions/pipeline.yaml",  status: "declared", runtime: "dispatchOnly",   note: "v2 role 派发" },
-];
 
-const CHANGES = [
-  { id: "manifest-3", action: "opencode sync-agents", time: "2 小时前", target: "~/.config/opencode.local.json", consumed: false, files: 4 },
-  { id: "manifest-2", action: "pipeline registry 更新", time: "1 天前", target: "extensions/pipeline.yaml", consumed: false, files: 1 },
-  { id: "manifest-1", action: "install --force", time: "3 天前", target: "~/.orchAgent/", consumed: true, files: 12 },
-];
 
 /* ============ 状态 ============ */
 let roleEditing = null;      // 当前编辑的 role id，'__new__' 表示新建
@@ -797,13 +575,9 @@ function markDirty() { dirty = true; setSync("dirty"); }
 
 /* ============ 导航 ============ */
 const VIEW_META = {
-  runtime:     ["Runtime Status", "运行时总览与健康状态"],
   workflow:    ["Workflow Graph", "流水线：阶段 + 门禁 + 回退边"],
   roles:       ["Roles", "角色声明（不含凭证）"],
   prompts:     ["Prompts", "提示词来源与编辑"],
-  extensions:  ["Extensions", "五类扩展声明"],
-  credentials: ["Host Resolution", "宿主解析状态"],
-  changes:     ["Changes & Rollback", "变更历史与回滚"],
 };
 
 function switchView(name) {
@@ -1115,109 +889,6 @@ function savePrompt() {
   renderPrompts();
 }
 
-/* ============ Extensions 视图 ============ */
-function renderExtensions() {
-  const card = $("#ext-card");
-  card.innerHTML = `
-    <div class="table-scroll">
-    <table class="table">
-      <thead><tr><th>扩展</th><th>路径</th><th>状态</th><th>运行时</th><th>说明</th></tr></thead>
-      <tbody>
-        ${EXTENSIONS.map(e => {
-          const st = e.status === "declared" ? '<span class="badge ok"><span class="dot"></span>declared</span>'
-                   : '<span class="badge err"><span class="dot"></span>error</span>';
-          const rt = e.runtime === "dispatchOnly" ? '<span class="badge accent"><span class="dot"></span>dispatchOnly</span>'
-                   : e.runtime === "notImplemented" ? '<span class="badge muted">notImplemented</span>'
-                   : '<span class="badge warn"><span class="dot"></span>' + e.runtime + '</span>';
-          return `<tr>
-            <td class="mono">${esc(e.id)}</td>
-            <td class="mono" style="color:var(--text-2)">${esc(e.path)}</td>
-            <td>${st}</td>
-            <td>${rt}</td>
-            <td style="color:${e.status === 'error' ? 'var(--danger)' : 'var(--text-2)'}">${esc(e.note)}</td>
-          </tr>`;
-        }).join('')}
-      </tbody>
-    </table>
-    </div>
-  `;
-}
-
-/* ============ Changes 视图 ============ */
-function renderChanges() {
-  const card = $("#changes-card");
-  if (CHANGES.length === 0) {
-    card.innerHTML = `
-      <div class="state-box">
-        <div class="ico"><svg viewBox="0 0 24 24"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg></div>
-        <div class="t">暂无变更记录</div>
-        <div class="d">尚未执行任何写入操作</div>
-      </div>`;
-    return;
-  }
-  const rows = CHANGES.map(c => {
-    const st = c.consumed
-      ? '<span class="badge muted">consumed</span>'
-      : '<span class="badge ok"><span class="dot"></span>pending</span>';
-    const actions = c.consumed
-      ? '<span style="color:var(--text-3);font-size:var(--fs-xs)">已消费，不可回滚</span>'
-      : `<button class="ghost btn-sm" onclick="showDiff('${c.id}')">查看 diff</button>
-         <button class="danger btn-sm" onclick="doRollback('${c.id}')" style="margin-left:8px">回滚</button>`;
-    return `
-      <tr>
-        <td class="mono" style="font-weight:600">${esc(c.id)}</td>
-        <td style="color:var(--text-2)">${esc(c.action)}</td>
-        <td class="mono" style="color:var(--text-2)">${esc(c.target)}</td>
-        <td>${st}</td>
-        <td style="color:var(--text-3);font-size:var(--fs-xs);white-space:nowrap">${esc(c.time)}</td>
-        <td style="text-align:right;white-space:nowrap">${actions}</td>
-      </tr>
-      <tr class="diff-row" id="diff-row-${c.id}" style="display:none">
-        <td colspan="6" style="padding:0 16px 14px"><div class="diff" id="diff-${c.id}"></div></td>
-      </tr>`;
-  }).join('');
-  card.innerHTML = `
-    <div class="table-scroll">
-      <table class="table">
-        <thead><tr><th>ID</th><th>Action</th><th>Target</th><th>Status</th><th>Time</th><th style="text-align:right">Actions</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-    <div style="padding:12px 16px;border-top:1px solid var(--border);font-size:var(--fs-xs);color:var(--text-3)">
-      每次写入生成 rollback manifest，回滚一次性消费（consumed 后不可再次回滚）。
-    </div>`;
-}
-
-function showDiff(id) {
-  const row = $("#diff-row-" + id);
-  const box = $("#diff-" + id);
-  if (row.style.display === "none") {
-    box.innerHTML = diffSample(id);
-    row.style.display = "table-row";
-  } else {
-    row.style.display = "none";
-  }
-}
-
-function diffSample(id) {
-  return `
-    <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--input-bg)">
-      <div class="dl add"><span class="mark">+</span><span class="n">1</span><span class="code">"version": 2,</span></div>
-      <div class="dl add"><span class="mark">+</span><span class="n">2</span><span class="code">"roles": [ … ],</span></div>
-      <div class="dl"><span class="mark">&nbsp;</span><span class="n">3</span><span class="code">"pipelines": [</span></div>
-      <div class="dl del"><span class="mark">-</span><span class="n">4</span><span class="code">  "revision": "0",</span></div>
-      <div class="dl add"><span class="mark">+</span><span class="n">4</span><span class="code">  "revision": "1",</span></div>
-      <div class="dl"><span class="mark">&nbsp;</span><span class="n">5</span><span class="code">  "route": { "taskTypes": ["bug"], "priority": 10 }</span></div>
-    </div>`;
-}
-
-function doRollback(id) {
-  const c = CHANGES.find(x => x.id === id);
-  c.consumed = true;
-  toast("↺ 已回滚", c.id + " 已消费，恢复到写入前状态");
-  renderChanges();
-}
-
 /* ============ 冲突处理 ============ */
 function openConflict(target) {
   conflictPending = { target };
@@ -1258,8 +929,6 @@ function resolveConflict(overwrite) {
 renderWorkflow();
 renderRoles();
 renderPrompts();
-renderExtensions();
-renderChanges();
 applyPromptModeUI();
 </script>
 </body>
