@@ -154,6 +154,8 @@ HostResolutionAdapter.resolve(provider, model)
 | `GET` | `/api/v1/backups` | 列出可回滚 manifest 的脱敏摘要 |
 | `POST` | `/api/v1/backups/{id}/rollback` | 一次性消费指定 manifest，并进行 hash 冲突检查 |
 
+`GET /api/v1/snapshot` 的 `pipeline.pipelines[].stageRoles` 按 registry 中的 stage 原始顺序返回 `{id, role}`；v1 pipeline 不定义 role，因此返回空列表。
+
 v0.12 Web API 不提供 OpenCode agent preview/sync 端点。受管 agent 同步必须通过既有
 `orchagent opencode sync-agents` CLI 显式执行，与 registry apply 分开处理。
 

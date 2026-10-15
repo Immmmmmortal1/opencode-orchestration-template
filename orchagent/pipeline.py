@@ -432,6 +432,11 @@ def list_pipelines(home: Path = DEFAULT_HOME) -> dict[str, Any]:
             "stages": len(pipeline["stages"]),
             "gates": len(pipeline["gates"]),
             "edges": len(pipeline["edges"]),
+            "stageRoles": (
+                [{"id": stage["id"], "role": stage["role"]} for stage in pipeline["stages"]]
+                if registry["version"] == 2
+                else []
+            ),
         }
         for pipeline in registry["pipelines"]
     ]

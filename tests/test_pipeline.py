@@ -112,6 +112,34 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(["bugfix"], [item["id"] for item in listed["pipelines"]])
         self.assertTrue(ok, diagnosed)
 
+    def test_v2_list_preserves_stage_role_order(self) -> None:
+        listed = list_pipelines(self.env.home)
+
+        self.assertEqual(
+            [
+                {"id": "investigate", "role": "investigator"},
+                {"id": "repro", "role": "investigator"},
+                {"id": "fix", "role": "fixer"},
+                {"id": "verify", "role": "verifier"},
+            ],
+            listed["pipelines"][0]["stageRoles"],
+        )
+
+    def test_v1_list_has_empty_stage_roles(self) -> None:
+        self.env.write_registry("pipeline", registry())
+
+        listed = list_pipelines(self.env.home)
+
+        self.assertEqual([], listed["pipelines"][0]["stageRoles"])
+
+    def test_list_keeps_pipeline_count_fields_compatible(self) -> None:
+        listed = list_pipelines(self.env.home)
+        item = listed["pipelines"][0]
+
+        self.assertEqual(4, item["stages"])
+        self.assertEqual(4, item["gates"])
+        self.assertEqual(8, item["edges"])
+
     def test_v1_registry_reports_builtin_only(self) -> None:
         self.env.write_registry("pipeline", registry())
 
