@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from .console_txn import apply_config_transaction, rollback_config_transaction, snapshot_files
+from .opencode import sync_agents_from_registry
 from .pipeline import _validate_registry, list_pipelines, load_pipeline_registry
 from .prompts import (
+    load_prompt_file_contents,
     load_prompt_registry,
     prompt_markdown_paths,
     prompt_registry_path,
@@ -41,11 +43,16 @@ def _file_snapshot(home: Path) -> dict[str, Any]:
     paths = [PIPELINE_FILE]
     prompt_path = prompt_registry_path(home)
     if prompt_path.exists():
-        registry, error = load_prompt_registry(home)
-        if error is not None or registry is None or validate_prompt_registry(home, registry).get("status") != "ok":
-            return _error("snapshot_failed", "snapshot")
         paths.append(PROMPT_FILE)
-        paths.extend(f"prompts/{path}" for path in prompt_markdown_paths(registry))
+        registry, error = load_prompt_registry(home)
+        if error is None and registry is not None:
+            try:
+                contents = load_prompt_file_contents(home, registry)
+            except ValueError:
+                pass
+            else:
+                if validate_prompt_registry(home, registry, contents).get("status") == "ok":
+                    paths.extend(f"prompts/{path}" for path in prompt_markdown_paths(registry))
     elif prompt_path.parent.is_dir():
         paths.append(PROMPT_FILE)
     pipeline = snapshot_files(home, paths)
@@ -62,15 +69,47 @@ def snapshot(home: Path) -> dict[str, Any]:
     if files.get("status") != "ok":
         return files
     pipeline = list_pipelines(home)
+    if pipeline.get("status") == "ok":
+        pipeline_registry, pipeline_error = load_pipeline_registry(home)
+        if (
+            pipeline_error is None
+            and pipeline_registry is not None
+            and _validate_registry(pipeline_registry) is None
+        ):
+            pipeline["version"] = pipeline_registry["version"]
+            pipeline["definition"] = pipeline_registry
     prompt_path = prompt_registry_path(home)
     if prompt_path.exists():
-        prompt_validation = validate_prompt_registry(home)
-        prompts = {
-            "status": prompt_validation["status"],
-            "checks": prompt_validation.get("checks", []),
-        }
+        prompt_registry, prompt_error = load_prompt_registry(home)
+        if prompt_error is not None or prompt_registry is None:
+            prompt_result = prompt_error or _error("registry_read_error", "registry")
+            prompts = {**prompt_result, "registry": None, "files": []}
+        else:
+            try:
+                prompt_contents = load_prompt_file_contents(home, prompt_registry)
+            except ValueError as exc:
+                prompts = {
+                    "status": "error",
+                    "checks": [{"level": "error", "code": str(exc), "location": "registry"}],
+                    "registry": None,
+                    "files": [],
+                }
+            else:
+                prompt_validation = validate_prompt_registry(home, prompt_registry, prompt_contents)
+                if prompt_validation.get("status") == "ok":
+                    prompts = {
+                        "status": prompt_validation["status"],
+                        "checks": prompt_validation.get("checks", []),
+                        "registry": prompt_registry,
+                        "files": [
+                            {"path": path, "content": prompt_contents[path]}
+                            for path in prompt_markdown_paths(prompt_registry)
+                        ],
+                    }
+                else:
+                    prompts = {**prompt_validation, "registry": None, "files": []}
     else:
-        prompts = {"status": "unknown", "prompts": 0, "targets": 0}
+        prompts = {"status": "unknown", "prompts": 0, "targets": 0, "registry": None, "files": []}
     return {
         "status": "ok",
         "snapshotHash": _snapshot_hash(files["hashes"]),
@@ -285,7 +324,13 @@ def diff_draft(home: Path, draft: Any) -> dict[str, Any]:
     return {"status": "ok", "changes": changes, "diff": diff_payload, "diffId": diff_id}
 
 
-def apply_draft(home: Path, draft: Any, snapshotHash: str, confirmDiffId: str) -> dict[str, Any]:
+def apply_draft(
+    home: Path,
+    draft: Any,
+    snapshotHash: str,
+    confirmDiffId: str,
+    syncOpencode: bool = False,
+) -> dict[str, Any]:
     home = Path(home)
     validation = validate_draft(home, draft)
     if validation["status"] != "ok":
@@ -336,10 +381,70 @@ def apply_draft(home: Path, draft: Any, snapshotHash: str, confirmDiffId: str) -
         result["restored"] = rollback.get("status") == "ok" or rollback.get("restored") is True
         result["rollback"] = rollback
         return result
-    return {
+    result = {
         "status": "ok",
+        "saved": True,
         "backupId": applied["backupId"],
         "snapshotHash": updated["snapshotHash"],
         "reloadRequired": True,
         "files": diff["changes"],
+        "synced": False,
+        "syncStatus": "not-requested",
     }
+    if not syncOpencode:
+        return result
+
+    try:
+        pipeline_registry = json.loads(json.dumps(updated["pipeline"]["definition"]))
+        prompt_summary = updated["prompts"]
+        if prompt_summary["status"] == "unknown":
+            prompt_registry = None
+            prompt_file_contents = None
+        elif prompt_summary["status"] == "ok":
+            prompt_registry = json.loads(json.dumps(prompt_summary["registry"]))
+            prompt_file_contents = {
+                item["path"]: item["content"] for item in prompt_summary["files"]
+            }
+        else:
+            raise ValueError("invalid_prompt_registry")
+        sync_snapshot = snapshot(home)
+        if (
+            sync_snapshot.get("status") != "ok"
+            or sync_snapshot.get("snapshotHash") != updated["snapshotHash"]
+        ):
+            sync_result = {"status": "registry_changed_before_sync"}
+        else:
+            sync_result = sync_agents_from_registry(
+                home, pipeline_registry, prompt_registry, prompt_file_contents
+            )
+            final_snapshot = snapshot(home)
+            if (
+                final_snapshot.get("status") != "ok"
+                or final_snapshot.get("snapshotHash") != updated["snapshotHash"]
+            ):
+                sync_result = {"status": "registry_changed_before_sync"}
+    except Exception:
+        sync_result = {"status": "error"}
+    if sync_result.get("status") == "ok":
+        result.update({"synced": True, "syncStatus": "ok"})
+        return result
+
+    if sync_result.get("status") == "registry_changed_before_sync":
+        result.update({
+            "syncStatus": "error",
+            "syncError": {
+                "code": "registry_changed_before_sync",
+                "message": "Registry changed before OpenCode agent synchronization",
+            },
+        })
+        return result
+
+    # Registry 已成功保存；同步错误只返回固定安全信息，避免透出宿主配置细节。
+    result.update({
+        "syncStatus": "error",
+        "syncError": {
+            "code": "opencode_sync_failed",
+            "message": "OpenCode agent synchronization failed",
+        },
+    })
+    return result

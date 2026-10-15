@@ -7,7 +7,7 @@ from fnmatch import fnmatchcase
 from unittest import mock
 
 from orchagent.install import backup_root
-from orchagent.opencode import sync_agents
+from orchagent.opencode import sync_agents, sync_agents_from_registry
 from tests.helpers import IsolatedEnv
 
 
@@ -171,6 +171,25 @@ class OpenCodeAgentTests(unittest.TestCase):
         self.assertIs(registry, render.call_args.args[1])
         self.assertIs(file_contents, render.call_args.args[4])
         self.assertEqual("Loaded registry prompt", self.read_config()["agent"]["orchagent-role-fixer"]["prompt"])
+
+    def test_sync_core_uses_passed_registry_without_rereading_disk(self) -> None:
+        loaded = v2_registry()
+        loaded["roles"][1]["description"] = "immutable input"
+        disk = v2_registry()
+        disk["roles"][1]["description"] = "changed on disk"
+        self.env.write_registry("pipeline", disk)
+
+        with (
+            mock.patch("orchagent.opencode.primary_config_path", return_value=self.env.opencode_config),
+            mock.patch("orchagent.opencode.load_pipeline_registry") as load,
+        ):
+            result = sync_agents_from_registry(self.env.home, loaded)
+
+        self.assertEqual("ok", result["status"])
+        load.assert_not_called()
+        agent = self.read_config()["agent"]["orchagent-role-fixer"]
+        self.assertIn("immutable input", agent["description"])
+        self.assertNotIn("changed on disk", agent["description"])
 
     def test_invalid_prompt_registry_fails_without_config_or_backup(self) -> None:
         self.write_prompt_registry({"version": 1, "prompts": "invalid", "targets": []})

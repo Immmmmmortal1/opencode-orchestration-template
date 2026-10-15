@@ -6,6 +6,7 @@ import threading
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
 
 from orchagent.console_server import MAX_REQUEST_BYTES, make_handler
 from orchagent.console_txn import apply_config_transaction, file_digest
@@ -116,15 +117,60 @@ class ConsoleServerTests(unittest.TestCase):
         self.assertNotIn("name=\"env\"", text)
         self.assertNotIn("name=\"source\"", text)
 
+    def test_static_save_actions_expose_save_only_and_safe_opencode_sync(self) -> None:
+        status, body = self.request("GET", "/")
+        self.assertEqual(200, status)
+        text = body.decode()
+        self.assertIn("仅保存", text)
+        self.assertIn("保存并同步到 OpenCode", text)
+
+        status, body = self.request("GET", "/app.js")
+        self.assertEqual(200, status)
+        script = body.decode()
+        self.assertIn("syncOpencode", script)
+        self.assertIn("result.syncError.message", script)
+
     def test_apply_requires_exact_payload_and_confirm_diff_id(self) -> None:
         base = {"draft": {"pipeline": {}}, "snapshotHash": "hash"}
-        for payload in (base, {**base, "confirmDiffId": "diff", "extra": True}):
+        invalid_payloads = (
+            base,
+            {**base, "confirmDiffId": "diff"},
+            {**base, "confirmDiffId": "diff", "syncOpencode": False, "extra": True},
+            {**base, "confirmDiffId": "diff", "syncOpencode": 0},
+        )
+        for payload in invalid_payloads:
             with self.subTest(payload=payload):
                 status, body = self.request(
                     "POST", "/api/v1/draft/apply", json.dumps(payload).encode(), {"Content-Type": "application/json"}
                 )
                 self.assertEqual(400, status)
                 self.assertEqual("invalid_request", json.loads(body)["error"])
+
+    def test_apply_sync_partial_success_remains_http_success(self) -> None:
+        result = {
+            "status": "ok",
+            "saved": True,
+            "synced": False,
+            "syncStatus": "error",
+            "syncError": {"code": "opencode_sync_failed", "message": "OpenCode agent synchronization failed"},
+        }
+        payload = {
+            "draft": {"pipeline": {}},
+            "snapshotHash": "hash",
+            "confirmDiffId": "diff",
+            "syncOpencode": True,
+        }
+        with mock.patch("orchagent.console_server.console_api.apply_draft", return_value=result) as apply:
+            status, body = self.request(
+                "POST",
+                "/api/v1/draft/apply",
+                json.dumps(payload).encode(),
+                {"Content-Type": "application/json"},
+            )
+
+        self.assertEqual(200, status)
+        self.assertEqual(result, json.loads(body))
+        apply.assert_called_once_with(self.env.home, payload["draft"], "hash", "diff", True)
 
     def test_backup_list_and_rollback_endpoint(self) -> None:
         target = self.env.home / "extensions/pipeline.yaml"

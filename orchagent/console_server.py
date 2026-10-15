@@ -184,7 +184,11 @@ def make_handler(home: Path = DEFAULT_HOME) -> type[BaseHTTPRequestHandler]:
             if payload is None:
                 return
             if path == "/api/v1/draft/apply":
-                if not isinstance(payload, dict) or set(payload) != {"draft", "snapshotHash", "confirmDiffId"}:
+                if (
+                    not isinstance(payload, dict)
+                    or set(payload) != {"draft", "snapshotHash", "confirmDiffId", "syncOpencode"}
+                    or not isinstance(payload.get("syncOpencode"), bool)
+                ):
                     result = {"status": "error", "error": "invalid_request"}
                 else:
                     result = console_api.apply_draft(
@@ -192,6 +196,7 @@ def make_handler(home: Path = DEFAULT_HOME) -> type[BaseHTTPRequestHandler]:
                         payload.get("draft"),
                         payload.get("snapshotHash"),
                         payload.get("confirmDiffId"),
+                        payload["syncOpencode"],
                     )
             else:
                 draft = payload.get("draft") if isinstance(payload, dict) and set(payload) == {"draft"} else payload

@@ -3,29 +3,146 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>orchAgent Console</title>
+  <meta name="color-scheme" content="dark">
+  <title>orchAgent 控制台</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <header><div><strong>orchAgent</strong><span>Console</span></div><button id="reload">重新加载</button></header>
-  <main>
-    <section id="notice" class="notice loading">正在读取本地配置…</section>
-    <section class="grid">
-      <article><h2>Snapshot</h2><dl id="snapshot"></dl></article>
-      <article><h2>Host Resolution <small>只读</small></h2><div id="hosts">等待加载</div></article>
-    </section>
-    <article><h2>Roles <small>v2；只保存 provider/model 名称</small></h2><div id="roles">等待加载</div><div id="role-editor" class="role-editor"></div></article>
-    <article><h2>Pipelines <small>管线列表</small></h2><div id="pipeline-list">等待加载</div></article>
-    <article>
-      <div class="title-row"><div><h2>Draft</h2><p>输入完整 Draft JSON；所有结果均由本地 API 返回。</p></div><span id="dirty" class="pill">clean</span></div>
-      <textarea id="draft" spellcheck="false" aria-label="Draft JSON"></textarea>
-      <div class="actions">
-        <button data-action="validate">校验</button><button data-action="preview">预览</button><button data-action="diff">Diff</button><button data-action="apply" class="primary">Apply</button>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">o</div>
+        <div>
+          <div class="brand-name">orchAgent</div>
+          <div class="brand-ver">Console</div>
+        </div>
       </div>
-      <pre id="result">尚未执行操作</pre>
-    </article>
-    <article><h2>Backups</h2><div id="backups">等待加载</div></article>
-  </main>
+
+      <nav class="nav" aria-label="编排导航">
+        <div class="nav-group">
+          <div class="nav-group-label">编排</div>
+          <button class="nav-item active" type="button" data-view="workflow" aria-current="page">Workflow Graph</button>
+          <button class="nav-item" type="button" data-view="roles">Roles</button>
+          <button class="nav-item" type="button" data-view="prompts">Prompts</button>
+        </div>
+      </nav>
+
+      <div class="sidebar-foot" id="app-status" role="status">
+        <span class="dot" aria-hidden="true"></span>
+        <span class="txt" id="app-status-text">127.0.0.1:8138 · 正在连接</span>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div>
+          <div class="topbar-title" id="topbar-title">Workflow Graph</div>
+          <div class="topbar-sub" id="topbar-sub">流水线阶段、门禁与边</div>
+        </div>
+        <div class="topbar-right">
+          <button class="icon" id="reload" type="button" data-action="reload" aria-label="重新加载" title="重新加载">重新加载</button>
+        </div>
+      </header>
+
+      <main class="content">
+        <section class="view active" id="view-workflow" aria-labelledby="workflow-title">
+          <div class="page-head">
+            <h1 class="page-title" id="workflow-title">Workflow Graph</h1>
+            <p class="page-desc">从本机 pipeline registry 读取阶段、门禁与边。</p>
+          </div>
+
+          <div class="empty-state" id="workflow-empty" hidden>本机 pipeline registry 中暂无可显示的流水线。</div>
+          <div id="workflow-list" aria-live="polite"></div>
+        </section>
+
+        <section class="view" id="view-roles" aria-labelledby="roles-title" hidden>
+          <div class="page-head">
+            <h1 class="page-title" id="roles-title">Roles</h1>
+            <p class="page-desc">浏览与编辑 v2 角色声明；只保存 role、provider、model 与描述等名称，不读取、保存或验证任何凭据。</p>
+          </div>
+
+          <div class="notice" id="role-readonly" hidden role="status"></div>
+          <div class="card">
+            <div class="card-head">
+              <span class="t">角色列表</span>
+              <span class="hint">真正的模型调用由宿主完成</span>
+              <div class="spacer">
+                <button class="btn-sm" type="button" data-action="role-new">新建 role</button>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table class="table">
+                <thead>
+                  <tr><th scope="col">id</th><th scope="col">provider</th><th scope="col">model</th><th scope="col">description</th><th scope="col">操作</th></tr>
+                </thead>
+                <tbody id="role-body"></tbody>
+              </table>
+            </div>
+            <div class="empty-state" id="role-empty" hidden>当前没有可显示的 v2 role。</div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <span class="t">编辑 role</span>
+              <span class="hint" id="role-edit-hint">选择上方角色后在此编辑</span>
+            </div>
+            <div class="card-body" id="role-edit-body"></div>
+          </div>
+        </section>
+
+        <section class="view" id="view-prompts" aria-labelledby="prompts-title" hidden>
+          <div class="page-head">
+            <h1 class="page-title" id="prompts-title">Prompts</h1>
+            <p class="page-desc">Prompt Registry 保存元数据、继承与目标绑定，Markdown 文件保存正文；本地覆盖必须显式选择，所有路径均受授权根限制。</p>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <span class="t">提示词来源</span>
+              <span class="hint">预览只渲染 Markdown，不执行模板表达式</span>
+            </div>
+            <div class="table-scroll">
+              <table class="table">
+                <thead>
+                  <tr><th scope="col">目标</th><th scope="col">来源</th><th scope="col">prompt</th><th scope="col">操作</th></tr>
+                </thead>
+                <tbody id="prompt-body"></tbody>
+              </table>
+            </div>
+            <div class="empty-state" id="prompt-empty" hidden>Prompt Registry 中暂无可显示的目标绑定。</div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <span class="t">编辑 prompt</span>
+              <span class="hint" id="prompt-edit-hint">选择上方目标后在此编辑</span>
+            </div>
+            <div class="card-body" id="prompt-edit-body"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div class="skeleton" id="skeleton" aria-live="polite" aria-label="正在读取本机配置">
+    <div class="sk"><div class="sk-line w40"></div><div class="sk-line w70"></div></div>
+    <div class="sk"><div class="sk-line w90"></div><div class="sk-line w40"></div><div class="sk-line w70"></div></div>
+    <div class="sk"><div class="sk-line w70"></div><div class="sk-line w90"></div></div>
+  </div>
+
+  <div class="modal-mask" id="save-modal" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="save-title">
+      <header class="modal-head" id="save-title">确认保存</header>
+      <div class="modal-body" id="save-body"></div>
+      <footer class="modal-foot">
+        <button class="ghost" id="save-cancel" type="button" data-action="save-cancel">取消</button>
+        <button class="ghost" id="save-only" type="button" data-action="save-only">仅保存</button>
+        <button id="save-confirm" type="button" data-action="save-confirm">保存并同步到 OpenCode</button>
+      </footer>
+    </section>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="/app.js"></script>
 </body>
 </html>

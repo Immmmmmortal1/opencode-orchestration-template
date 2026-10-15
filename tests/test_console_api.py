@@ -21,9 +21,70 @@ class ConsoleApiTests(unittest.TestCase):
     def test_snapshot_summarizes_default_pipeline(self) -> None:
         result = snapshot(self.env.home)
         self.assertEqual("ok", result["status"])
+        self.assertEqual(str(self.env.home / "extensions/pipeline.yaml"), result["pipeline"]["registry"])
         self.assertEqual("dispatchOnly", result["pipeline"]["runtime"])
+        self.assertEqual(2, result["pipeline"]["version"])
+        self.assertEqual(self.pipeline, result["pipeline"]["definition"])
         self.assertTrue(result["pipeline"]["roles"])
+        definition = result["pipeline"]["definition"]["pipelines"][0]
+        self.assertTrue(definition["stages"])
+        self.assertTrue(definition["gates"])
+        self.assertTrue(definition["edges"])
+        self.assertTrue(definition["route"])
         self.assertEqual(64, len(result["snapshotHash"]))
+
+    def test_snapshot_returns_prompt_registry_and_sorted_markdown_files(self) -> None:
+        root = self.env.home / "prompts"
+        (root / "templates").mkdir(parents=True, exist_ok=True)
+        (root / "overrides").mkdir(exist_ok=True)
+        template = "# Base prompt\n\nUse the project contract."
+        override = "# Role override\n\nKeep the change minimal."
+        (root / "templates/base.md").write_text(template, encoding="utf-8")
+        (root / "overrides/role.md").write_text(override, encoding="utf-8")
+        registry = {
+            "version": 1,
+            "prompts": [{"id": "base", "template": "templates/base.md"}],
+            "targets": [{
+                "kind": "role",
+                "id": self.pipeline["roles"][0]["id"],
+                "prompt": "base",
+                "override": "overrides/role.md",
+            }],
+        }
+        (root / "prompts.json").write_text(json.dumps(registry), encoding="utf-8")
+
+        result = snapshot(self.env.home)
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual("ok", result["prompts"]["status"])
+        self.assertEqual(registry, result["prompts"]["registry"])
+        self.assertEqual([
+            {"path": "overrides/role.md", "content": override},
+            {"path": "templates/base.md", "content": template},
+        ], result["prompts"]["files"])
+
+    def test_snapshot_redacts_rejected_prompt_content(self) -> None:
+        root = self.env.home / "prompts"
+        rejected_body = "password = example-value-for-detection"
+        (root / "base.md").write_text(rejected_body, encoding="utf-8")
+        registry = {
+            "version": 1,
+            "prompts": [{"id": "base", "template": "base.md"}],
+            "targets": [{
+                "kind": "role",
+                "id": self.pipeline["roles"][0]["id"],
+                "prompt": "base",
+            }],
+        }
+        (root / "prompts.json").write_text(json.dumps(registry), encoding="utf-8")
+
+        result = snapshot(self.env.home)
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual("error", result["prompts"]["status"])
+        self.assertIsNone(result["prompts"]["registry"])
+        self.assertEqual([], result["prompts"]["files"])
+        self.assertNotIn(rejected_body, json.dumps(result))
 
     def test_validate_accepts_v2_and_rejects_v1_invalid_and_sensitive(self) -> None:
         self.assertEqual("ok", validate_draft(self.env.home, {"pipeline": self.pipeline})["status"])
@@ -85,11 +146,138 @@ class ConsoleApiTests(unittest.TestCase):
         diff_id = diff_draft(self.env.home, draft)["diffId"]
         result = apply_draft(self.env.home, draft, before, diff_id)
         self.assertEqual("ok", result["status"])
+        self.assertTrue(result["saved"])
+        self.assertFalse(result["synced"])
+        self.assertEqual("not-requested", result["syncStatus"])
         self.assertTrue(result["backupId"])
         self.assertNotEqual(before, result["snapshotHash"])
         stale_draft = {"pipeline": self.pipeline}
         stale = apply_draft(self.env.home, stale_draft, before, diff_draft(self.env.home, stale_draft)["diffId"])
         self.assertEqual("snapshot_conflict", stale["error"])
+
+    def test_apply_can_sync_opencode_agents_after_save(self) -> None:
+        before = snapshot(self.env.home)["snapshotHash"]
+        changed = copy.deepcopy(self.pipeline)
+        changed["roles"][0]["description"] = "sync success"
+        draft = {"pipeline": changed}
+        diff_id = diff_draft(self.env.home, draft)["diffId"]
+
+        with mock.patch("orchagent.console_api.sync_agents_from_registry", return_value={"status": "ok"}) as sync:
+            result = apply_draft(self.env.home, draft, before, diff_id, True)
+
+        self.assertTrue(result["saved"])
+        self.assertTrue(result["synced"])
+        self.assertEqual("ok", result["syncStatus"])
+        sync.assert_called_once()
+        self.assertEqual(changed, sync.call_args.args[1])
+        self.assertIsNone(sync.call_args.args[2])
+        self.assertIsNone(sync.call_args.args[3])
+
+    def test_apply_sync_passes_saved_prompt_snapshot_to_core(self) -> None:
+        role_id = self.pipeline["roles"][0]["id"]
+        registry = {
+            "version": 1,
+            "prompts": [{"id": "base", "template": "base.md"}],
+            "targets": [{"kind": "role", "id": role_id, "prompt": "base"}],
+        }
+        draft = {"prompts": registry, "files": [{"path": "base.md", "content": "Saved prompt"}]}
+        before = snapshot(self.env.home)["snapshotHash"]
+        diff_id = diff_draft(self.env.home, draft)["diffId"]
+
+        with mock.patch("orchagent.console_api.sync_agents_from_registry", return_value={"status": "ok"}) as sync:
+            result = apply_draft(self.env.home, draft, before, diff_id, True)
+
+        self.assertTrue(result["synced"])
+        self.assertEqual(registry, sync.call_args.args[2])
+        self.assertEqual({"base.md": "Saved prompt"}, sync.call_args.args[3])
+
+    def test_apply_does_not_sync_registry_changed_after_save(self) -> None:
+        before = snapshot(self.env.home)["snapshotHash"]
+        changed = copy.deepcopy(self.pipeline)
+        changed["roles"][0]["description"] = "apply A"
+        draft = {"pipeline": changed}
+        diff_id = diff_draft(self.env.home, draft)["diffId"]
+        real_snapshot = snapshot
+        snapshot_calls = 0
+
+        def mutate_after_apply(home):
+            nonlocal snapshot_calls
+            result = real_snapshot(home)
+            snapshot_calls += 1
+            if snapshot_calls == 1:
+                concurrent = copy.deepcopy(changed)
+                concurrent["roles"][0]["description"] = "concurrent B"
+                (self.env.home / "extensions/pipeline.yaml").write_text(
+                    json.dumps(concurrent), encoding="utf-8"
+                )
+            return result
+
+        with (
+            mock.patch("orchagent.console_api.snapshot", side_effect=mutate_after_apply),
+            mock.patch("orchagent.console_api.sync_agents_from_registry", return_value={"status": "ok"}) as sync,
+        ):
+            result = apply_draft(self.env.home, draft, before, diff_id, True)
+
+        self.assertEqual("ok", result["status"])
+        self.assertTrue(result["saved"])
+        self.assertFalse(result["synced"])
+        self.assertEqual("error", result["syncStatus"])
+        self.assertEqual("registry_changed_before_sync", result["syncError"]["code"])
+        self.assertEqual(
+            "Registry changed before OpenCode agent synchronization",
+            result["syncError"]["message"],
+        )
+        sync.assert_not_called()
+
+    def test_apply_keeps_saved_registry_when_opencode_sync_fails(self) -> None:
+        before = snapshot(self.env.home)["snapshotHash"]
+        changed = copy.deepcopy(self.pipeline)
+        changed["roles"][0]["description"] = "saved before sync failure"
+        draft = {"pipeline": changed}
+        diff_id = diff_draft(self.env.home, draft)["diffId"]
+
+        with mock.patch(
+            "orchagent.console_api.sync_agents_from_registry",
+            return_value={"status": "error", "error": "unsafe", "message": "secret marker"},
+        ):
+            result = apply_draft(self.env.home, draft, before, diff_id, True)
+
+        self.assertEqual("ok", result["status"])
+        self.assertTrue(result["saved"])
+        self.assertFalse(result["synced"])
+        self.assertEqual("error", result["syncStatus"])
+        self.assertEqual("opencode_sync_failed", result["syncError"]["code"])
+        self.assertNotIn("secret marker", json.dumps(result))
+        written = json.loads((self.env.home / "extensions/pipeline.yaml").read_text(encoding="utf-8"))
+        self.assertEqual("saved before sync failure", written["roles"][0]["description"])
+
+    def test_apply_reports_unsynced_when_registry_changes_during_sync(self) -> None:
+        before = snapshot(self.env.home)["snapshotHash"]
+        changed = copy.deepcopy(self.pipeline)
+        changed["roles"][0]["description"] = "saved input"
+        draft = {"pipeline": changed}
+        diff_id = diff_draft(self.env.home, draft)["diffId"]
+        from orchagent.opencode import sync_agents_from_registry as real_sync
+
+        def mutate_during_sync(home, pipeline_registry, prompt_registry, prompt_file_contents):
+            result = real_sync(home, pipeline_registry, prompt_registry, prompt_file_contents)
+            concurrent = copy.deepcopy(changed)
+            concurrent["roles"][0]["description"] = "concurrent change"
+            (self.env.home / "extensions/pipeline.yaml").write_text(
+                json.dumps(concurrent), encoding="utf-8"
+            )
+            return result
+
+        with mock.patch(
+            "orchagent.console_api.sync_agents_from_registry",
+            side_effect=mutate_during_sync,
+        ):
+            result = apply_draft(self.env.home, draft, before, diff_id, True)
+
+        self.assertEqual("ok", result["status"])
+        self.assertTrue(result["saved"])
+        self.assertFalse(result["synced"])
+        self.assertEqual("registry_changed_before_sync", result["syncError"]["code"])
 
     def test_apply_prompt_registry(self) -> None:
         root = self.env.home / "prompts"

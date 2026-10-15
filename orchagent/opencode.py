@@ -12,6 +12,7 @@ from .pipeline import load_pipeline_registry, _validate_registry
 from .prompts import (
     load_prompt_file_contents,
     load_prompt_registry,
+    prompt_markdown_paths,
     prompt_registry_path,
     render_prompt_registry,
     validate_prompt_registry,
@@ -353,12 +354,15 @@ def _pipeline_prompt(pipeline: dict[str, Any], roles: dict[str, dict[str, Any]])
     return "\n".join(lines)
 
 
-def sync_agents(home: Path = DEFAULT_HOME) -> dict[str, Any]:
-    """把启用的 v2 管线同步为受 marker 保护的 opencode agents。"""
-    registry, error = load_pipeline_registry(home)
-    if error:
-        return {"status": "error", "error": "invalid_registry", "message": error["message"]}
-    assert registry is not None
+def sync_agents_from_registry(
+    home: Path,
+    registry: dict[str, Any],
+    prompt_registry: dict[str, Any] | None = None,
+    prompt_file_contents: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """使用调用方提供的注册表快照同步 agents，不重读注册表文件。"""
+    if not isinstance(registry, dict):
+        return {"status": "error", "error": "invalid_registry", "message": "pipeline registry is invalid"}
     if registry.get("version") == 1:
         return {"status": "error", "error": "unsupported", "message": "pipeline registry version 1 does not define agent roles"}
     validation_error = _validate_registry(registry)
@@ -367,17 +371,13 @@ def sync_agents(home: Path = DEFAULT_HOME) -> dict[str, Any]:
 
     role_ids = {role["id"] for role in registry["roles"]}
     role_prompts: dict[str, str] = {}
-    prompt_path = prompt_registry_path(home)
-    if os.path.lexists(prompt_path):
-        prompt_registry, prompt_error = load_prompt_registry(home)
-        if prompt_error:
+    if prompt_registry is None:
+        if prompt_file_contents not in (None, {}):
             return {"status": "error", "error": "invalid_prompt_registry", "message": "prompt registry is invalid"}
-        assert prompt_registry is not None
-        try:
-            file_contents = load_prompt_file_contents(home, prompt_registry)
-        except ValueError:
+    else:
+        if not isinstance(prompt_file_contents, dict) or set(prompt_file_contents) != set(prompt_markdown_paths(prompt_registry)):
             return {"status": "error", "error": "invalid_prompt_registry", "message": "prompt registry is invalid"}
-        prompt_validation = validate_prompt_registry(home, prompt_registry, file_contents)
+        prompt_validation = validate_prompt_registry(home, prompt_registry, prompt_file_contents)
         if prompt_validation["status"] != "ok":
             return {"status": "error", "error": "invalid_prompt_registry", "message": "prompt registry is invalid"}
         if any(target_prompt["id"] not in role_ids for target_prompt in prompt_registry["targets"]):
@@ -388,7 +388,7 @@ def sync_agents(home: Path = DEFAULT_HOME) -> dict[str, Any]:
                 prompt_registry,
                 target_prompt["prompt"],
                 target_prompt.get("override"),
-                file_contents,
+                prompt_file_contents,
             )
             if rendered["status"] != "ok":
                 return {"status": "error", "error": "invalid_prompt_registry", "message": "prompt registry is invalid"}
@@ -474,6 +474,27 @@ def sync_agents(home: Path = DEFAULT_HOME) -> dict[str, Any]:
     data["agent"] = agents
     write_json(target, data)
     return {"status": "ok", "target": str(target), "changed": changed, "backupDir": str(backup_dir)}
+
+
+def sync_agents(home: Path = DEFAULT_HOME) -> dict[str, Any]:
+    """从磁盘加载注册表，再把启用的 v2 管线同步为 opencode agents。"""
+    registry, error = load_pipeline_registry(home)
+    if error:
+        return {"status": "error", "error": "invalid_registry", "message": error["message"]}
+    assert registry is not None
+
+    prompt_registry: dict[str, Any] | None = None
+    prompt_file_contents: dict[str, str] | None = None
+    if os.path.lexists(prompt_registry_path(home)):
+        prompt_registry, prompt_error = load_prompt_registry(home)
+        if prompt_error:
+            return {"status": "error", "error": "invalid_prompt_registry", "message": "prompt registry is invalid"}
+        assert prompt_registry is not None
+        try:
+            prompt_file_contents = load_prompt_file_contents(home, prompt_registry)
+        except ValueError:
+            return {"status": "error", "error": "invalid_prompt_registry", "message": "prompt registry is invalid"}
+    return sync_agents_from_registry(home, registry, prompt_registry, prompt_file_contents)
 
 
 def unlink_agents(home: Path = DEFAULT_HOME) -> dict[str, Any]:

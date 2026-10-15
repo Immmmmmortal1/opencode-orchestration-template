@@ -34,16 +34,14 @@
 
 配置生效分为两层：
 
-1. 点击 Apply 只写入 orchAgent 管理的 pipeline、Prompt Registry 和 Markdown 文件；刷新页面即可重新读取 provider catalog。Provider Catalog 只读宿主 provider/model 的安全 id，不修改宿主 provider 配置，也不验证凭据是否有效。
-2. 如果改动需要同步到 opencode agent，保存成功后在另一个终端显式执行：
+1. “保存并同步到 OpenCode”先写入 orchAgent 管理的 pipeline、Prompt Registry 和 Markdown 文件，再执行既有的 `sync-agents`，把托管 Agent 更新到 OpenCode 配置；“仅保存”只完成第一层。Provider Catalog 只读宿主 provider/model 的安全 id，不修改宿主 provider 配置，也不验证凭据是否有效。
+2. 同步成功后仍需退出并完整重启 OpenCode；OpenCode 在启动时读取 agent/provider 配置，已有进程不会热加载这些文件。若同步失败，控制台明确显示“已保存但未同步”，不会回滚已成功保存的 orchAgent registry；修复冲突后可再次保存并同步，也可在终端显式执行：
 
    ```bash
    ./bin/orchagent opencode sync-agents
    ```
 
-   然后退出并重新启动 opencode。opencode 在启动时读取 agent/provider 配置，已有进程不会热加载这些文件。
-
-控制台不会自动执行 `sync-agents`，也不会自动重启 opencode；这样可以明确区分“配置已保存”和“宿主已重新加载”。
+控制台不会自动重启 OpenCode，并始终区分“配置已保存”“已同步到宿主配置”和“宿主已重新加载”。
 
 ## 3. 数据真相源与状态
 
