@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import unittest
 from unittest import mock
 
@@ -106,8 +107,11 @@ class ConsoleApiTests(unittest.TestCase):
         self.assertEqual(before, path.read_bytes())
 
     def test_diff_contains_bounded_before_and_after_content(self) -> None:
+        # 不依赖默认 registry 体积：改 canonical 序列化中靠前（route 在 pipelines[0] 早期）、
+        # 且在 4096 字节预览窗口内的字段，证明 before/after 预览承载真实改动内容。
+        marker_before = self.pipeline["pipelines"][0]["route"]["priority"]
         changed = copy.deepcopy(self.pipeline)
-        changed["roles"][0]["description"] = "updated concrete preview"
+        changed["pipelines"][0]["route"]["priority"] = marker_before + 1
 
         result = diff_draft(self.env.home, {"pipeline": changed})
 
@@ -117,8 +121,18 @@ class ConsoleApiTests(unittest.TestCase):
         self.assertEqual("replace", change["operation"])
         self.assertEqual(64, len(change["beforeHash"]))
         self.assertEqual(64, len(change["afterHash"]))
-        self.assertIn(self.pipeline["roles"][0]["description"], change["beforePreview"])
-        self.assertIn("updated concrete preview", change["afterPreview"])
+        self.assertNotEqual(change["beforeHash"], change["afterHash"])
+        before_preview = change["beforePreview"]
+        after_preview = change["afterPreview"]
+        # 直接从预览文本中提取 priority 值，验证承载的是真实改动内容
+        def preview_priority(preview: str) -> int:
+            match = re.search(r'"priority":\s*(\d+)', preview)
+            self.assertIsNotNone(match, preview)
+            return int(match.group(1))
+        self.assertIsNotNone(before_preview)
+        self.assertIsNotNone(after_preview)
+        self.assertEqual(marker_before, preview_priority(before_preview))
+        self.assertEqual(marker_before + 1, preview_priority(after_preview))
         self.assertEqual(result["changes"], result["diff"]["changes"])
 
     def test_markdown_diff_uses_raw_content_and_reports_creation(self) -> None:

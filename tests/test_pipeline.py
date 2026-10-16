@@ -106,7 +106,7 @@ class PipelineTests(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(2, loaded["version"])
         self.assertEqual(["bugfix"], [item["id"] for item in loaded["pipelines"]])
-        self.assertEqual({"investigator", "fixer", "verifier"}, {role["id"] for role in loaded["roles"]})
+        self.assertEqual({"investigator", "fixer", "verifier", "reviewer"}, {role["id"] for role in loaded["roles"]})
         self.assertEqual("ok", listed["status"])
         self.assertEqual("dispatchOnly", listed["runtime"])
         self.assertEqual(["bugfix"], [item["id"] for item in listed["pipelines"]])
@@ -121,6 +121,7 @@ class PipelineTests(unittest.TestCase):
                 {"id": "repro", "role": "investigator"},
                 {"id": "fix", "role": "fixer"},
                 {"id": "verify", "role": "verifier"},
+                {"id": "review", "role": "reviewer"},
             ],
             listed["pipelines"][0]["stageRoles"],
         )
@@ -136,9 +137,9 @@ class PipelineTests(unittest.TestCase):
         listed = list_pipelines(self.env.home)
         item = listed["pipelines"][0]
 
-        self.assertEqual(4, item["stages"])
-        self.assertEqual(4, item["gates"])
-        self.assertEqual(8, item["edges"])
+        self.assertEqual(5, item["stages"])
+        self.assertEqual(5, item["gates"])
+        self.assertEqual(10, item["edges"])
 
     def test_v1_registry_reports_builtin_only(self) -> None:
         self.env.write_registry("pipeline", registry())

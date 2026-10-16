@@ -775,6 +775,7 @@ def _dispatch_result(
     run_id: str,
     stage_id: str,
     role: dict[str, Any],
+    stage_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     role_id = role["id"]
     return {
@@ -783,6 +784,7 @@ def _dispatch_result(
         "sessionId": session_id,
         "pipeline": {"id": pipeline["id"], "revision": pipeline["revision"], "runId": run_id},
         "stage": stage_id,
+        "params": dict(stage_params) if stage_params else {},
         "role": {
             key: role[key]
             for key in ("id", "provider", "model")
@@ -955,7 +957,9 @@ def run_advance(
         return released
     assert next_stage is not None
     role = roles[stages[next_stage]["role"]]
-    return _dispatch_result(session_id, selected, run_id, next_stage, role)
+    return _dispatch_result(
+        session_id, selected, run_id, next_stage, role, stages[next_stage].get("params")
+    )
 
 
 def run_pipeline(
@@ -1112,7 +1116,14 @@ def run_pipeline(
             released = _release_dispatch_lease(home, session, lease_token, lease_epoch)
             if released.get("status") != "ok":
                 return released
-            return _dispatch_result(active_session_id, selected, run_id, current_stage, role)
+            return _dispatch_result(
+                active_session_id,
+                selected,
+                run_id,
+                current_stage,
+                role,
+                stages[current_stage].get("params"),
+            )
 
         terminal_reason: str | None = None
         while terminal_reason is None:

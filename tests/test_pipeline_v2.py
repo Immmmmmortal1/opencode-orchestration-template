@@ -11,6 +11,7 @@ from orchagent.pipeline import (
     doctor_pipelines,
     list_pipelines,
     list_roles,
+    load_pipeline_registry,
     route_pipeline,
     run_advance,
     run_pipeline,
@@ -776,6 +777,102 @@ class PipelineV2Tests(unittest.TestCase):
             new_session_summary="同时传入",
         )
         self.assertEqual("invalid_session_selection", result["error"])
+
+    # —— 以下用例基于已安装的默认 bugfix 模板（review stage + reviewer role，revision 2）——
+
+    def start_default_run(self) -> dict[str, Any]:
+        """不覆盖 registry，直接使用 install_home() 装入的默认模板（bugfix@2，含 review stage）。"""
+        return run_pipeline(self.env.home, "bugfix", new_session_summary="default template run")
+
+    def default_passes(self, session_id: str, count: int) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for _ in range(count):
+            result = run_advance(self.env.home, session_id, "pass")
+            self.assertEqual("ok", result["status"])
+        return result
+
+    def test_default_bugfix_contains_review_edges(self) -> None:
+        loaded, error = load_pipeline_registry(self.env.home)
+        self.assertIsNone(error)
+        pipeline = loaded["pipelines"][0]
+        edges = {
+            (edge["from"]["stage"], edge["from"]["gate"], edge["from"]["verdict"]): edge["to"]
+            for edge in pipeline["edges"]
+        }
+        self.assertEqual(
+            {"stage": "review"},
+            edges[("verify", "gate-verify-regression", "pass")],
+        )
+        self.assertEqual(
+            {"terminal": "succeeded"},
+            edges[("review", "gate-review-diff", "pass")],
+        )
+        self.assertEqual(
+            {"stage": "fix"},
+            edges[("review", "gate-review-diff", "fail")],
+        )
+
+    def test_default_advance_through_review_dispatches_reviewer_then_succeeds(self) -> None:
+        started = self.start_default_run()
+        # investigate → repro → fix → verify 四次 pass 后，下一步必须派发 review/reviewer
+        result = self.default_passes(started["sessionId"], 4)
+
+        self.assertEqual("dispatch", result["mode"])
+        self.assertEqual("review", result["stage"])
+        self.assertEqual("reviewer", result["role"]["id"])
+        self.assertEqual("deepseek", result["role"]["provider"])
+        self.assertEqual("deepseek-v4-pro", result["role"]["model"])
+
+        # review pass 后进入终态 succeeded
+        final = self.default_passes(started["sessionId"], 1)
+        self.assertEqual("terminal", final["mode"])
+        self.assertEqual("succeeded", final["terminalReason"])
+        persisted = load_session(self.env.home, started["sessionId"])["session"]
+        self.assertEqual("succeeded", persisted["status"])
+        run = persisted["pipelineRuns"][final["pipeline"]["runId"]]
+        self.assertEqual("succeeded", run["status"])
+        self.assertFalse(lease_path(self.env.home, started["sessionId"]).exists())
+
+    def test_default_review_fail_rolls_back_to_fix_and_invalidates_downstream(self) -> None:
+        started = self.start_default_run()
+        self.default_passes(started["sessionId"], 4)
+        self.assertEqual("review", load_session(self.env.home, started["sessionId"])["session"]["currentStep"])
+
+        result = run_advance(self.env.home, started["sessionId"], "fail")
+
+        self.assertEqual("dispatch", result["mode"])
+        self.assertEqual("fix", result["stage"])
+        self.assertEqual("fixer", result["role"]["id"])
+        run = load_session(self.env.home, started["sessionId"])["session"]["pipelineRuns"][result["pipeline"]["runId"]]
+        invalidated = {
+            row["gateKey"]["stageId"]: row["invalidatedReason"]
+            for row in run["gateResults"]
+            if row["invalidatedReason"] is not None
+        }
+        # 按 §5.7 语义：回退目标 fix 及其下游 verify/review 的 gate 结果全部失效
+        self.assertEqual({"fix", "verify", "review"}, set(invalidated))
+        self.assertTrue(all(reason == "rollback_to:fix" for reason in invalidated.values()))
+        # 回退目标自身之外的、不在失效集合内的 stage（investigate/repro）不得被误伤
+        self.assertNotIn("investigate", invalidated)
+        self.assertNotIn("repro", invalidated)
+
+    def test_dispatch_result_includes_params_from_stage(self) -> None:
+        # 默认模板 stage 未配置 params：dispatch 结果仍带 params 且为 dict
+        started = self.start_default_run()
+        self.assertIn("params", started)
+        self.assertEqual({}, started["params"])
+        first_advance = run_advance(self.env.home, started["sessionId"], "pass")
+        self.assertEqual("ok", first_advance["status"])
+        self.assertIn("params", first_advance)
+        self.assertIsInstance(first_advance["params"], dict)
+
+        # 显式配置 params（如 runtime=debugbridge）时必须原样带出该键值
+        data = role_registry()
+        data["pipelines"][0]["stages"][0]["params"] = {"runtime": "debugbridge"}
+        self.env.write_registry("pipeline", data)
+        result = run_pipeline(self.env.home, "bugfix", new_session_summary="runtime params")
+        self.assertEqual("dispatch", result["mode"])
+        self.assertEqual({"runtime": "debugbridge"}, result["params"])
 
 
 if __name__ == "__main__":

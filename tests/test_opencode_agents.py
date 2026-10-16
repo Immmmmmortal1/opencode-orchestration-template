@@ -8,7 +8,7 @@ from unittest import mock
 
 from orchagent.install import backup_root
 from orchagent.opencode import sync_agents, sync_agents_from_registry
-from tests.helpers import IsolatedEnv
+from tests.helpers import IsolatedEnv, PROJECT_ROOT
 
 
 def v2_registry() -> dict[str, object]:
@@ -341,6 +341,78 @@ class OpenCodeAgentTests(unittest.TestCase):
         self.assertNotIn("orchagent-bugfix", agents)
         self.assertNotIn("orchagent-role-fixer", agents)
         self.assertIn("custom", agents)
+
+    def test_pipeline_prompt_runtime_hint_follows_stage_params(self) -> None:
+        # 配置 params.runtime=debugbridge 的 stage：pipeline prompt 含真机验证提示行
+        configured = v2_registry()
+        configured["pipelines"][0]["stages"][0]["params"] = {"runtime": "debugbridge"}
+        self.env.write_registry("pipeline", configured)
+        self.assertEqual(0, self.env.run_cli("opencode", "sync-agents")[0])
+        prompt = self.read_config()["agent"]["orchagent-bugfix"]["prompt"]
+        self.assertIn("此 stage 启用真机验证（runtime=debugbridge）", prompt)
+
+        # 未配置 runtime 的 stage：该提示行不出现
+        self.env.write_registry("pipeline", v2_registry())
+        self.assertEqual(0, self.env.run_cli("opencode", "sync-agents")[0])
+        bare_prompt = self.read_config()["agent"]["orchagent-bugfix"]["prompt"]
+        self.assertNotIn("真机验证", bare_prompt)
+
+    # —— 以下用例基于已安装的默认模板（含 reviewer role，deepseek/deepseek-v4-pro）——
+
+    def install_default_template(self) -> None:
+        """恢复默认 pipeline 模板（setUp 已用 v2_registry 覆盖，install_home 不会重写已存在文件）。"""
+        template = json.loads((PROJECT_ROOT / "templates" / "extensions" / "pipeline.yaml").read_text(encoding="utf-8"))
+        self.env.write_registry("pipeline", template)
+
+    def test_sync_generates_reviewer_subagent_from_default_template(self) -> None:
+        self.install_default_template()
+        code, result, _, _ = self.env.run_cli("opencode", "sync-agents")
+
+        self.assertEqual(0, code, result)
+        agent = self.read_config()["agent"]["orchagent-role-reviewer"]
+        self.assertEqual("subagent", agent["mode"])
+        self.assertEqual("deepseek/deepseek-v4-pro", agent["model"])
+        self.assertEqual("orchAgent-managed", agent["marker"])
+        self.assertEqual({"task": "deny"}, agent["permission"])
+
+    def test_verifier_prompt_contains_builtin_contract(self) -> None:
+        self.install_default_template()
+        self.assertEqual(0, self.env.run_cli("opencode", "sync-agents")[0])
+        prompt = self.read_config()["agent"]["orchagent-role-verifier"]["prompt"]
+
+        self.assertIn("测试用例", prompt)
+        self.assertIn("退出码", prompt)
+        self.assertIn("runtime=debugbridge", prompt)
+        self.assertIn("runtime-blocked", prompt)
+
+    def test_reviewer_prompt_contains_builtin_contract(self) -> None:
+        self.install_default_template()
+        self.assertEqual(0, self.env.run_cli("opencode", "sync-agents")[0])
+        prompt = self.read_config()["agent"]["orchagent-role-reviewer"]["prompt"]
+
+        self.assertIn("是否越界", prompt)
+        self.assertIn("是否过度设计", prompt)
+        self.assertIn("破坏性修复", prompt)
+        self.assertIn("证据一致性", prompt)
+        self.assertIn("pass / revise / blocked", prompt)
+        self.assertIn("reworkTarget=verify", prompt)
+
+    def test_builtin_contracts_do_not_leak_into_other_roles(self) -> None:
+        self.install_default_template()
+        self.assertEqual(0, self.env.run_cli("opencode", "sync-agents")[0])
+        investigator = self.read_config()["agent"]["orchagent-role-investigator"]["prompt"]
+        fixer = self.read_config()["agent"]["orchagent-role-fixer"]["prompt"]
+
+        for prompt in (investigator, fixer):
+            for exclusive in (
+                "测试用例",
+                "退出码",
+                "runtime-blocked",
+                "是否越界",
+                "破坏性修复",
+                "reworkTarget=verify",
+            ):
+                self.assertNotIn(exclusive, prompt)
 
 
 if __name__ == "__main__":

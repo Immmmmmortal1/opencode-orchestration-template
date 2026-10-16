@@ -130,9 +130,13 @@ v2 的核心：**orchAgent 只做编排与派发，不执行、不调 LLM、不�
    ```json
    { "status":"ok","mode":"dispatch","sessionId":"...",
      "pipeline":{"id":"bugfix","revision":"1","runId":"..."},
-     "stage":"investigate","role":{"id":"investigator","provider":"deepseek","model":"deepseek-v4-flash"},
+     "stage":"investigate","params":{},
+     "role":{"id":"investigator","provider":"deepseek","model":"deepseek-v4-flash"},
      "message":"next: dispatch role 'investigator' (provider=deepseek, model=deepseek-v4-flash)" }
    ```
+   `params` 随 dispatch 输出**被派发 stage 的自由参数**（stage 未声明时为 `{}`）；宿主可据此
+   启用**条件能力**（例如 `runtime=debugbridge` 时对 verify stage 启用真机验证，见 §2.5）。
+   `params` 键为**加法变更**：对宿主向后兼容，不识别该键的旧消费者忽略即可。
 2. **`pipeline advance --session-id <id> --verdict pass|fail [--evidence <json>]`**：回填当前门禁结果，
    复用 §5 的终止决策表与回退边语义：
    - `pass` → 沿 pass 边到下一 stage（输出新的派发指令）或 `succeeded` 落终态；
@@ -152,6 +156,52 @@ v2 的核心：**orchAgent 只做编排与派发，不执行、不调 LLM、不�
 门禁、回退边与 revision-pinned `direct-run`/`advance` 调用说明。`orchagent opencode unlink --agents`
 只删带 marker 者。
 **未托管同名 agent → 拒绝覆盖**（fail-closed）。生成的 agent 定义**不含任何凭证**。
+
+### 2.5 验证门与审查门（bugfix 管线，2026-10-15）
+
+默认 `bugfix` 管线（revision 2）的阶段序列为：
+
+```text
+investigate → repro → fix → verify → review → succeeded
+```
+
+`revision` 从 1 升到 2 属于**新管线定义**：旧 revision 的 in-flight run **无法继续推进**
+（`run_advance` 会因找不到该 revision 报错），需重开 run。
+
+- `verify`（role=verifier）通过后进入 `review`（role=reviewer）审查门；**review 通过才落 `succeeded`**；
+- 回退边：`verify/fail → repro`（既有）；`review/fail → fix`；
+- **`review/fail` 不选 `→ verify`**：review 失败意味着代码必被修改，回退到 verify 只会对**同一份代码**重跑
+  验证——不产生修复，只会空转耗尽 `maxAttempts`。回退到 `fix` 使 finding 有确定性闭合路径
+  （fix → verify → review 重走）。若 reviewer 判定问题在「验证证据不足」而非「代码有问题」，
+  由主 agent 按 `reworkTarget=verify` 标注经 `verify/fail → repro` 路径处理，不新增边。
+
+**stage `params` 与条件能力**：v2 stage 可声明自由参数 `params`（仅要求为 object，新增键无需改 schema），
+**随 dispatch 结果一起输出**（见 §2.4 示例）。宿主据此启用条件能力：例如 `params.runtime == "debugbridge"`
+的 verify stage 追加真机验证要求；**默认管线不配置 `runtime`**（orchAgent 自身无 iOS App，
+硬编码会导致验证门永不可过）。
+
+**verifier / reviewer 的行为契约由 role prompt 内置**（`opencode sync-agents` 生成 role subagent 时
+写入 prompt），**不引入新的配置文件**。要点：
+
+- **verifier（始终必做，缺任一项不得 pass）**：读取前序阶段证据并输出当前问题的**测试用例**
+  （前置/步骤/预期/实际）；执行**自动化验证**并回填证据（命令、退出码、输出摘要）；**回归检查**
+  （原问题消失且无新增回归）。
+- **verifier（仅当 `params.runtime == "debugbridge"` 时追加）**：配合 XcodeBuildMCP 完成
+  构建→安装→启动调试设备，对同一目标执行 DebugBridge ping，按测试用例在真机上操作并读取
+  view 层次与运行日志作为证据。构建/ping 失败或缺运行时证据时结论必须是 **`runtime-blocked`**：
+  不得转为 pass、不得换设备、不得降级为截图或静态检查。`runtime-blocked` 时宿主**不得调用
+  `pipeline advance`**，也不得把 `runtime-blocked` 翻译为 `fail` 推进——那会沿 `verify/fail → repro`
+  空转，`repro→fix→verify` 重跑后设备/环境仍不可用，白耗 `maxAttempts`，甚至促使 fixer 对
+  非代码问题做无效改动；应先解决设备/环境阻塞，再重新执行 verify。
+- **reviewer（固定四维审查，输出 `pass | revise | blocked`）**：① 是否**越界**（改动需求范围外的
+  模块/接口/行为）；② 是否**过度设计**（多余抽象/配置/状态机/兼容层）；③ 是否**破坏性修复**
+  （破坏既有 API/配置/数据/工作流且无迁移回退）；④ **证据一致性**（代码是否真对应 verifier
+  用例，是否存在假通过）。reviewer **不得复用 verifier 的 verdict** 作为自身结论；
+  `blocked` 表示无法判定，需主 agent 补齐输入，不得自动 pass，**也不得把 `blocked` 翻译为
+  `fail` 推进**——`blocked` 时宿主不得调用 `pipeline advance`（不消耗门禁路径、不触发回退边），
+  应由主 agent 补齐缺失输入后重新执行 review，再按 `pass` / `revise` 归一为 `pass` / `fail`
+  调用 advance（`revise` 由宿主归一为 `fail` 即回退 `fix`）。宿主读取 dispatch 输出的 `params` 后，
+  需把它传给 verifier 角色；verifier 的契约文本是静态的，自身看不到实际 params。
 
 ## 3. 硬约束
 
@@ -405,6 +455,8 @@ runner 在 stage/gate 边界续约失败属于失权事件，不再进入回退�
 - 门禁拿它**逐条比对**
 - 自测阶段仍然需要 review 参与：确认**验收条件本身没被偷偷放宽**
 
+（v2 默认 `bugfix` 管线已将这类结果审查落实为独立 `review` 门，见 §2.5。）
+
 这与「用 skill 固化执行」是同一精神：**事先定标准，而非事后自由裁量**。
 
 ## 8. 路由
@@ -519,7 +571,7 @@ orchagent pipeline run \
 | **3A** | （v1）Pipeline 定义 + session 集成；阶段/门禁/回退边 + §5 回退语义；`stage.skill` 与 `gate.evaluator` 均引用**已注册 skill**；补齐最小 `backend` 字段判别（见 §4.0） | 证明「带门禁和回退边的状态机」可行，**不碰通用引擎**；**3A 起就强制 skill 注册约束**。**已实现并发布 v0.8.0** |
 | **v2**（2026-10-08 方向调整） | role registry + `stage.role` + `pipeline run`(dispatch) / `pipeline advance` + `opencode sync-agents`（见 §2.4、[D14](design-decisions.md)） | 编排单元改为 **role**、**执行交宿主**；orchAgent 不调 LLM / 不碰 key。**已实现** |
 | **3B** | Skill / MCP capability seam（可插拔）+ 完整 I/O 契约 + agent 后端。**子期划分以 [`capability-seams.md`](capability-seams.md) §9 为唯一定义**（本文不复制子期表）；⚠️ 2026-10-08 方向调整：skill/MCP 归宿主、编排层不关心，本分期**暂停待重设** | 扩展能力，**不引入** 3A 尚不存在的 skill 强制边界 |
-| **3C** | 路由 + **第一条真实流水线**（bug 修复）端到端 | 用真实流水线检验模型。**v2 `bugfix` 管线（investigate→repro→fix→verify）已端到端跑通**（含门禁与回退边） |
+| **3C** | 路由 + **第一条真实流水线**（bug 修复）端到端 | 用真实流水线检验模型。**v2 `bugfix` 管线（revision 1：investigate→repro→fix→verify）已端到端跑通**（含门禁与回退边）；**revision 2 新增 review 审查门**（verify 通过后进入 review、review 通过才落 `succeeded`，见 §2.5） |
 
 > ⚠️ **v1（3A）与 v2 并存**：v1 的 skill 强制约束见于本节第 1–5 条硬约束与 §4；**v2 以 §2.4 + 第 6 条
 > 硬约束为准**，v2 不引用 skill。二者由 registry `version` 区分，不混用。

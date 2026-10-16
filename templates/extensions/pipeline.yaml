@@ -15,15 +15,21 @@
     },
     {
       "id": "verifier",
-      "provider": "openai",
-      "model": "gpt-5.5",
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
       "description": "验证回归测试与原始复现"
+    },
+    {
+      "id": "reviewer",
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "description": "审查 diff 是否越界、过度设计或破坏性修复"
     }
   ],
   "pipelines": [
     {
       "id": "bugfix",
-      "revision": "1",
+      "revision": "2",
       "enabled": true,
       "route": {
         "taskTypes": ["bug"],
@@ -58,6 +64,13 @@
           "maxAttempts": 3,
           "params": {},
           "gates": ["gate-verify-regression"]
+        },
+        {
+          "id": "review",
+          "role": "reviewer",
+          "maxAttempts": 3,
+          "params": {},
+          "gates": ["gate-review-diff"]
         }
       ],
       "gates": [
@@ -83,6 +96,12 @@
           "id": "gate-verify-regression",
           "stage": "verify",
           "evaluator": "gate-verify-regression",
+          "params": {}
+        },
+        {
+          "id": "gate-review-diff",
+          "stage": "review",
+          "evaluator": "gate-review-diff",
           "params": {}
         }
       ],
@@ -113,11 +132,19 @@
         },
         {
           "from": {"stage": "verify", "gate": "gate-verify-regression", "verdict": "pass"},
-          "to": {"terminal": "succeeded"}
+          "to": {"stage": "review"}
         },
         {
           "from": {"stage": "verify", "gate": "gate-verify-regression", "verdict": "fail"},
           "to": {"stage": "repro"}
+        },
+        {
+          "from": {"stage": "review", "gate": "gate-review-diff", "verdict": "pass"},
+          "to": {"terminal": "succeeded"}
+        },
+        {
+          "from": {"stage": "review", "gate": "gate-review-diff", "verdict": "fail"},
+          "to": {"stage": "fix"}
         }
       ]
     }

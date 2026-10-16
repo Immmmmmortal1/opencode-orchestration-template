@@ -304,14 +304,44 @@ def _pipeline_direct_run_command(pipeline: dict[str, Any]) -> str:
 
 def _role_prompt(role: dict[str, Any]) -> str:
     description = role.get("description") or "执行注册表声明的角色职责"
-    return "\n".join(
-        [
-            f"角色职责：{role['id']}，{description}。",
-            "只处理主 agent 派发的当前 stage。",
-            "返回可用于当前门禁判定的结构化摘要。",
-            "不得自行推进 pipeline、调用 pipeline advance，或派发其他 agent。",
-        ]
-    )
+    lines = [
+        f"角色职责：{role['id']}，{description}。",
+        "只处理主 agent 派发的当前 stage。",
+        "返回可用于当前门禁判定的结构化摘要。",
+        "不得自行推进 pipeline、调用 pipeline advance，或派发其他 agent。",
+    ]
+    # verifier / reviewer 内置行为契约（见需求链 State chain 三张表），其余 role 保持通用文本
+    if role["id"] == "verifier":
+        lines.extend([
+            "始终必做（缺任一项即不得给出 pass）：",
+            "- 读取 investigate / repro / fix 阶段证据，输出当前问题的测试用例（含：前置条件、操作步骤、预期结果、实际结果）。",
+            "- 运行自动化验证并回填证据：执行的命令、退出码、输出摘要。",
+            "- 回归检查：确认原问题已消失，且未引入新的回归。",
+            "仅当本 stage 的 params 中 runtime=debugbridge 时，追加必做：",
+            "- 必须配合 XcodeBuildMCP 完成构建 → 安装 → 启动调试设备（沿用既有原子链：session_set_defaults → session_show_defaults → build_run_device/build_run_sim）。",
+            "- 启动完成后必须对同一目标执行 DebugBridge ping；ping 成功才可继续。",
+            "- 按测试用例在真机上操作，读取实时 view 层级与当前运行日志作为证据。",
+            "- 构建/安装/启动失败、DebugBridge ping 失败或缺少运行时证据时，结论必须是 runtime-blocked：不得转为 pass，不得更换设备，不得降级为截图或静态检查。",
+            "runtime-blocked 时宿主不得调用 pipeline advance，也不得把 runtime-blocked 翻译为 fail 推进",
+            "——那会沿 verify/fail → repro 空转，repro→fix→verify 重跑后设备/环境仍不可用，白耗 maxAttempts，",
+            "甚至促使 fixer 对非代码问题做无效改动；应先解决设备/环境阻塞，再重新执行 verify。",
+            "未配置 runtime 时，只要求测试用例与自动化证据，不要求真机验证。",
+        ])
+    elif role["id"] == "reviewer":
+        lines.extend([
+            "输入必须包含：用户需求 / 已确认方案、完整 diff、修改文件清单、verifier 的验证报告；缺任一项应返回 blocked，不得猜测。",
+            "固定四个审查维度，逐项给出结论：",
+            "1. 是否越界：是否改动了需求范围之外的模块、接口或行为。",
+            "2. 是否过度设计：是否引入不必要的抽象、配置、状态机或兼容层。",
+            "3. 是否属于破坏性修复：是否破坏既有 API / 配置 / 数据格式 / 工作流，且缺少迁移或回退方案。",
+            "4. 证据一致性：代码实现是否真的对应 verifier 的测试用例，是否存在假通过。",
+            "输出 pass / revise / blocked 三者之一；不得复用 verifier 的 verdict 作为自身结论。",
+            "revise 由宿主归一为 fail 调用 advance；blocked 表示无法判定（审查输入不足），此时宿主不得调用 pipeline advance",
+            "（不消耗门禁路径、不触发回退边，也不得把 blocked 翻译为 fail 推进——那会错误回退到 fix）；",
+            "应由主 agent 补齐缺失输入后重新执行 review，再按 pass / revise 归一为 pass / fail 调用 advance。",
+            "若判定问题出在「验证证据不足」而非「代码有问题」，必须在结论中显式标注 reworkTarget=verify。",
+        ])
+    return "\n".join(lines)
 
 
 def _pipeline_prompt(pipeline: dict[str, Any], roles: dict[str, dict[str, Any]]) -> str:
@@ -332,6 +362,9 @@ def _pipeline_prompt(pipeline: dict[str, Any], roles: dict[str, dict[str, Any]])
             f"{index}. {stage['id']} → role={stage['role']} → "
             f"{role['provider']}/{model}；门禁：{', '.join(stage['gates'])}"
         )
+        # 带 params.runtime 的 stage 追加真机验证提示，未配置则不输出
+        if stage.get("params", {}).get("runtime") == "debugbridge":
+            lines.append("   此 stage 启用真机验证（runtime=debugbridge），验证证据要求见 verifier 角色契约。")
     lines.extend(["", "门禁与回退边："])
     for edge in pipeline["edges"]:
         source = edge["from"]
