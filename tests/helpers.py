@@ -31,6 +31,9 @@ SUBPROCESS_ENV_ALLOWLIST = frozenset(
 )
 SENSITIVE_ENV_MARKERS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "PROXY", "API")
 
+# 区分「未保存过 OPENCODE_CONFIG」与「保存值恰为 None」，避免 tearDown 误删真实值。
+_UNSET = object()
+
 
 def read_json(stdout: str) -> Any:
     """解析 CLI 标准输出中的 JSON。"""
@@ -65,13 +68,26 @@ class IsolatedEnv:
         for directory in (self.home, self.fake_home, self.bin_dir, self.external_dir):
             directory.mkdir(parents=True)
         self.opencode_config.write_text("{}\n", encoding="utf-8")
-        return self
 
+        # 隔离测试进程自身的宿主配置指向：进程内调用（如 apply_draft(syncOpencode=True)
+        # → sync_agents_from_registry → primary_config_path）若读到真实路径，会覆盖用户真实
+        # opencode 配置。此前只隔离了子进程环境（subprocess_env），进程内写入会逃逸。
+        self._saved_opencode_config = os.environ.get("OPENCODE_CONFIG")
+        os.environ["OPENCODE_CONFIG"] = str(self.opencode_config)
+        return self
     def tearDown(self) -> None:
         """清理隔离目录；可直接从 unittest.TestCase.tearDown 调用。"""
         if self._temporary_directory is not None:
             self._temporary_directory.cleanup()
             self._temporary_directory = None
+        # 还原进程环境，避免影响同一进程内的后续测试。
+        if getattr(self, "_saved_opencode_config", _UNSET) is _UNSET:
+            return
+        saved = self._saved_opencode_config
+        if saved is None:
+            os.environ.pop("OPENCODE_CONFIG", None)
+        else:
+            os.environ["OPENCODE_CONFIG"] = saved
 
     def __enter__(self) -> IsolatedEnv:
         return self.setUp()

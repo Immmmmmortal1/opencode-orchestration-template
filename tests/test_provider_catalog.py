@@ -11,15 +11,10 @@ from tests.helpers import IsolatedEnv
 
 class ProviderCatalogTests(unittest.TestCase):
     def setUp(self) -> None:
+        # OPENCODE_CONFIG 的进程内隔离由 IsolatedEnv 统一负责（setUp/tearDown），此处不再重复设置。
         self.env = IsolatedEnv().setUp()
-        self.original = os.environ.get("OPENCODE_CONFIG")
-        os.environ["OPENCODE_CONFIG"] = str(self.env.opencode_config)
 
     def tearDown(self) -> None:
-        if self.original is None:
-            os.environ.pop("OPENCODE_CONFIG", None)
-        else:
-            os.environ["OPENCODE_CONFIG"] = self.original
         self.env.tearDown()
 
     def test_catalog_is_sorted_and_does_not_echo_sensitive_values(self) -> None:
