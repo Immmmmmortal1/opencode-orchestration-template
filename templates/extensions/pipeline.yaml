@@ -62,7 +62,7 @@
           "id": "verify",
           "role": "verifier",
           "maxAttempts": 3,
-          "params": {},
+          "params": {"runtime": "debugbridge"},
           "gates": ["gate-verify-regression"]
         },
         {

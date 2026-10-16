@@ -459,6 +459,26 @@ class OpenCodeAgentTests(unittest.TestCase):
             ):
                 self.assertNotIn(exclusive, prompt)
 
+    def test_default_template_bugfix_verify_stage_requires_debugbridge(self) -> None:
+        """锁死：默认模板 bugfix 的 verify 阶段必须带 runtime=debugbridge。
+
+        该键缺失时 verifier 的真机契约（构建→安装→启动→DebugBridge ping→
+        按上游测试流程逐步驱动真机）会静默失效，且 pipeline prompt 不再输出提示行——
+        这正是此前 verify 阶段 params 为 {} 时真实发生过的回归。
+        """
+        template = json.loads(
+            (PROJECT_ROOT / "templates" / "extensions" / "pipeline.yaml").read_text(encoding="utf-8")
+        )
+        pipeline = next(item for item in template["pipelines"] if item["id"] == "bugfix")
+        verify = next(stage for stage in pipeline["stages"] if stage["id"] == "verify")
+        self.assertEqual({"runtime": "debugbridge"}, verify["params"])
+
+        # 安装默认模板并同步后，用户可见的 bugfix 入口提示必须出现真机验证提示行
+        self.install_default_template()
+        self.assertEqual(0, self.env.run_cli("opencode", "sync-agents")[0])
+        prompt = self.read_config()["agent"]["orchagent-bugfix"]["prompt"]
+        self.assertIn("此 stage 启用真机验证（runtime=debugbridge）", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()
