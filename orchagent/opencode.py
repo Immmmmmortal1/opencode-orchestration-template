@@ -310,22 +310,40 @@ def _role_prompt(role: dict[str, Any]) -> str:
         "返回可用于当前门禁判定的结构化摘要。",
         "不得自行推进 pipeline、调用 pipeline advance，或派发其他 agent。",
     ]
-    # verifier / reviewer 内置行为契约（见需求链 State chain 三张表），其余 role 保持通用文本
+    # investigator / verifier / reviewer / fixer 内置行为契约（见需求链 State chain 三张表），其余 role 保持通用文本
     if role["id"] == "verifier":
         lines.extend([
             "始终必做（缺任一项即不得给出 pass）：",
-            "- 读取 investigate / repro / fix 阶段证据，输出当前问题的测试用例（含：前置条件、操作步骤、预期结果、实际结果）。",
+            "- 读取上游产出的「测试流程」，据此验证当前问题；不得自行编造与上游不一致的测试用例。",
             "- 运行自动化验证并回填证据：执行的命令、退出码、输出摘要。",
             "- 回归检查：确认原问题已消失，且未引入新的回归。",
             "仅当本 stage 的 params 中 runtime=debugbridge 时，追加必做：",
             "- 必须配合 XcodeBuildMCP 完成构建 → 安装 → 启动调试设备（沿用既有原子链：session_set_defaults → session_show_defaults → build_run_device/build_run_sim）。",
             "- 启动完成后必须对同一目标执行 DebugBridge ping；ping 成功才可继续。",
-            "- 按测试用例在真机上操作，读取实时 view 层级与当前运行日志作为证据。",
+            "- 按上游「测试流程」自动逐步驱动真机（通过 DebugBridge 执行 tap / type 等操作，读取实时 view 层级与当前运行日志），",
+            "  逐步回填每一步的实际结果并与该步预期比对；每一步都要能对应到测试流程中的步骤。",
+            "- 不得用 XCTest / XCUITest 等 UI 测试框架替代 DebugBridge 真机流程执行。",
             "- 构建/安装/启动失败、DebugBridge ping 失败或缺少运行时证据时，结论必须是 runtime-blocked：不得转为 pass，不得更换设备，不得降级为截图或静态检查。",
             "runtime-blocked 时宿主不得调用 pipeline advance，也不得把 runtime-blocked 翻译为 fail 推进",
             "——那会沿 verify/fail → repro 空转，repro→fix→verify 重跑后设备/环境仍不可用，白耗 maxAttempts，",
             "甚至促使 fixer 对非代码问题做无效改动；应先解决设备/环境阻塞，再重新执行 verify。",
-            "未配置 runtime 时，只要求测试用例与自动化证据，不要求真机验证。",
+            "未配置 runtime 时，只要求依据上游测试流程的验证与自动化证据，不要求真机验证。",
+        ])
+    elif role["id"] == "investigator":
+        lines.extend([
+            "改代码前必须先产出以下五项，逐条列出：",
+            "- 代码位置：定位到具体文件与行号。",
+            "- bug 原因：根因（不是现象复述）。",
+            "- 证据：支撑根因的证据（复现步骤 / 日志 / 代码引用）。",
+            "- 解决方法：修复方案。",
+            "- 测试流程：前置条件 / 操作步骤 / 预期结果，必须可直接执行、可供下游逐步验证。",
+            "五项未齐不得交给 fix 阶段。",
+            "在 repro 阶段还须按该测试流程建立 red-capable 复现证据：改代码前必须能复现。",
+        ])
+    elif role["id"] == "fixer":
+        lines.extend([
+            "只按已确认的解决方法实施最小修复，不得扩大范围，不得顺手重构无关代码。",
+            "必须保证上游「测试流程」在修复后仍可执行；若确需变更测试流程，必须在结论中显式给出更新后的测试流程。",
         ])
     elif role["id"] == "reviewer":
         lines.extend([
@@ -334,7 +352,7 @@ def _role_prompt(role: dict[str, Any]) -> str:
             "1. 是否越界：是否改动了需求范围之外的模块、接口或行为。",
             "2. 是否过度设计：是否引入不必要的抽象、配置、状态机或兼容层。",
             "3. 是否属于破坏性修复：是否破坏既有 API / 配置 / 数据格式 / 工作流，且缺少迁移或回退方案。",
-            "4. 证据一致性：代码实现是否真的对应 verifier 的测试用例，是否存在假通过。",
+            "4. 证据一致性：代码实现是否真的对应上游产出的测试流程（含 verifier 据此回填的逐步验证证据），是否存在假通过。",
             "输出 pass / revise / blocked 三者之一；不得复用 verifier 的 verdict 作为自身结论。",
             "revise 由宿主归一为 fail 调用 advance；blocked 表示无法判定（审查输入不足），此时宿主不得调用 pipeline advance",
             "（不消耗门禁路径、不触发回退边，也不得把 blocked 翻译为 fail 推进——那会错误回退到 fix）；",

@@ -165,6 +165,8 @@ v2 的核心：**orchAgent 只做编排与派发，不执行、不调 LLM、不�
 investigate → repro → fix → verify → review → succeeded
 ```
 
+整体流程语义一句话：**改代码前定位/给因/取证/给方案/给测试流程 → 改 → 按测试流程真机自动验证 → diff 审查**。
+
 `revision` 从 1 升到 2 属于**新管线定义**：旧 revision 的 in-flight run **无法继续推进**
 （`run_advance` 会因找不到该 revision 报错），需重开 run。
 
@@ -180,28 +182,46 @@ investigate → repro → fix → verify → review → succeeded
 的 verify stage 追加真机验证要求；**默认管线不配置 `runtime`**（orchAgent 自身无 iOS App，
 硬编码会导致验证门永不可过）。
 
-**verifier / reviewer 的行为契约由 role prompt 内置**（`opencode sync-agents` 生成 role subagent 时
+**如何为 iOS 项目开启真机验证**：在项目使用的 registry（默认 `~/.orchAgent/extensions/pipeline.yaml`）
+里把 verify stage 的 `params` 设为 `{"runtime": "debugbridge"}`，然后重跑 `opencode sync-agents`。
+此后该 registry 上的 bugfix 才会产出真机验证要求与对应 prompt 提示行。**非 iOS 项目保持 `{}`**
+（否则 verify 会因无 iOS 目标被判 `runtime-blocked`）。这是**每个 registry 的运行期选择**，
+不是模板默认值。
+
+**verifier / reviewer / investigator / fixer 的行为契约由 role prompt 内置**（`opencode sync-agents` 生成 role subagent 时
 写入 prompt），**不引入新的配置文件**。要点：
 
-- **verifier（始终必做，缺任一项不得 pass）**：读取前序阶段证据并输出当前问题的**测试用例**
-  （前置/步骤/预期/实际）；执行**自动化验证**并回填证据（命令、退出码、输出摘要）；**回归检查**
-  （原问题消失且无新增回归）。
+- **investigator（改代码前五项产出，逐条列出）**：① 代码位置（定位到文件:行）；② bug 原因
+  （根因，不是现象复述）；③ 证据（复现步骤/日志/代码引用）；④ 解决方法（修复方案）；
+  ⑤ **测试流程**（前置条件/操作步骤/预期结果，可直接执行、可供下游逐步验证）。
+  **五项未齐不得进 fix**。repro 阶段还须按该测试流程建立 **red-capable 复现证据**
+  （改代码前必须能复现）。
+- **fixer**：只按已确认的解决方法实施**最小修复**，不扩范围、不顺手重构无关代码；
+  **必须保证上游「测试流程」在修复后仍可执行**，若确需变更测试流程，须显式给出
+  更新后的测试流程。
+- **verifier（始终必做，缺任一项不得 pass）**：**读取上游产出的「测试流程」据此验证**
+  （不得自行编造与上游不一致的测试用例）；执行**自动化验证**并回填证据（命令、退出码、
+  输出摘要）；**回归检查**（原问题消失且无新增回归）。
 - **verifier（仅当 `params.runtime == "debugbridge"` 时追加）**：配合 XcodeBuildMCP 完成
-  构建→安装→启动调试设备，对同一目标执行 DebugBridge ping，按测试用例在真机上操作并读取
-  view 层次与运行日志作为证据。构建/ping 失败或缺运行时证据时结论必须是 **`runtime-blocked`**：
+  构建→安装→启动调试设备，对同一目标执行 DebugBridge ping，**按上游测试流程自动逐步
+  驱动真机**（DebugBridge tap/type 等），逐步回填每一步实际结果并与该步预期比对，
+  读取实时 view 层次与运行日志作为证据；**不得用 XCTest / XCUITest 等 UI 测试框架
+  替代 DebugBridge 真机流程执行**。构建/ping 失败或缺运行时证据时结论必须是 **`runtime-blocked`**：
   不得转为 pass、不得换设备、不得降级为截图或静态检查。`runtime-blocked` 时宿主**不得调用
   `pipeline advance`**，也不得把 `runtime-blocked` 翻译为 `fail` 推进——那会沿 `verify/fail → repro`
   空转，`repro→fix→verify` 重跑后设备/环境仍不可用，白耗 `maxAttempts`，甚至促使 fixer 对
   非代码问题做无效改动；应先解决设备/环境阻塞，再重新执行 verify。
 - **reviewer（固定四维审查，输出 `pass | revise | blocked`）**：① 是否**越界**（改动需求范围外的
   模块/接口/行为）；② 是否**过度设计**（多余抽象/配置/状态机/兼容层）；③ 是否**破坏性修复**
-  （破坏既有 API/配置/数据/工作流且无迁移回退）；④ **证据一致性**（代码是否真对应 verifier
-  用例，是否存在假通过）。reviewer **不得复用 verifier 的 verdict** 作为自身结论；
+  （破坏既有 API/配置/数据/工作流且无迁移回退）；④ **证据一致性**（代码是否真对应上游产出的
+  测试流程及 verifier 据此回填的逐步证据，是否存在假通过）。reviewer **不得复用 verifier 的
+  verdict** 作为自身结论；
   `blocked` 表示无法判定，需主 agent 补齐输入，不得自动 pass，**也不得把 `blocked` 翻译为
   `fail` 推进**——`blocked` 时宿主不得调用 `pipeline advance`（不消耗门禁路径、不触发回退边），
   应由主 agent 补齐缺失输入后重新执行 review，再按 `pass` / `revise` 归一为 `pass` / `fail`
   调用 advance（`revise` 由宿主归一为 `fail` 即回退 `fix`）。宿主读取 dispatch 输出的 `params` 后，
   需把它传给 verifier 角色；verifier 的契约文本是静态的，自身看不到实际 params。
+  「上游产出的测试流程」指**最近一次产出的版本**（若 fixer 更新过，则以更新后为准）。
 
 ## 3. 硬约束
 

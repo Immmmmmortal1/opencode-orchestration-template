@@ -233,7 +233,9 @@ class OpenCodeAgentTests(unittest.TestCase):
             "角色职责：fixer，实施修复。\n"
             "只处理主 agent 派发的当前 stage。\n"
             "返回可用于当前门禁判定的结构化摘要。\n"
-            "不得自行推进 pipeline、调用 pipeline advance，或派发其他 agent。",
+            "不得自行推进 pipeline、调用 pipeline advance，或派发其他 agent。\n"
+            "只按已确认的解决方法实施最小修复，不得扩大范围，不得顺手重构无关代码。\n"
+            "必须保证上游「测试流程」在修复后仍可执行；若确需变更测试流程，必须在结论中显式给出更新后的测试流程。",
             self.read_config()["agent"]["orchagent-role-fixer"]["prompt"],
         )
 
@@ -380,10 +382,50 @@ class OpenCodeAgentTests(unittest.TestCase):
         self.assertEqual(0, self.env.run_cli("opencode", "sync-agents")[0])
         prompt = self.read_config()["agent"]["orchagent-role-verifier"]["prompt"]
 
-        self.assertIn("测试用例", prompt)
+        # 新口径锚点：依据上游测试流程、不得自行编造用例（旧锚点「测试用例」已随口径迁移废弃）
+        self.assertIn("不得自行编造", prompt)
+        self.assertIn("测试流程", prompt)
         self.assertIn("退出码", prompt)
         self.assertIn("runtime=debugbridge", prompt)
         self.assertIn("runtime-blocked", prompt)
+
+    def test_investigator_prompt_contains_builtin_contract(self) -> None:
+        self.install_default_template()
+        self.assertEqual(0, self.env.run_cli("opencode", "sync-agents")[0])
+        prompt = self.read_config()["agent"]["orchagent-role-investigator"]["prompt"]
+
+        # 改代码前五项产出
+        self.assertIn("代码位置", prompt)
+        self.assertIn("根因", prompt)
+        self.assertIn("证据", prompt)
+        self.assertIn("解决方法", prompt)
+        self.assertIn("测试流程", prompt)
+        self.assertIn("五项未齐", prompt)
+        # repro 阶段须建立 red-capable 复现证据
+        self.assertIn("red-capable", prompt)
+
+    def test_fixer_prompt_contains_builtin_contract(self) -> None:
+        self.install_default_template()
+        self.assertEqual(0, self.env.run_cli("opencode", "sync-agents")[0])
+        prompt = self.read_config()["agent"]["orchagent-role-fixer"]["prompt"]
+
+        self.assertIn("最小修复", prompt)
+        self.assertIn("测试流程", prompt)
+        # 若变更测试流程须显式给出更新后的测试流程
+        self.assertIn("更新后的测试流程", prompt)
+
+    def test_verifier_prompt_follows_upstream_test_flow(self) -> None:
+        self.install_default_template()
+        self.assertEqual(0, self.env.run_cli("opencode", "sync-agents")[0])
+        prompt = self.read_config()["agent"]["orchagent-role-verifier"]["prompt"]
+
+        self.assertIn("上游", prompt)
+        self.assertIn("测试流程", prompt)
+        # 旧口径已移除：不再要求 verifier 自行输出测试用例
+        self.assertNotIn("输出当前问题的测试用例", prompt)
+        # 禁止用 UI 测试框架替代 DebugBridge 真机流程
+        self.assertIn("XCTest", prompt)
+        self.assertIn("XCUITest", prompt)
 
     def test_reviewer_prompt_contains_builtin_contract(self) -> None:
         self.install_default_template()
@@ -394,6 +436,9 @@ class OpenCodeAgentTests(unittest.TestCase):
         self.assertIn("是否过度设计", prompt)
         self.assertIn("破坏性修复", prompt)
         self.assertIn("证据一致性", prompt)
+        # 第四维须锚定上游测试流程，不得再引用已废弃的「verifier 的测试用例」
+        self.assertIn("上游产出的测试流程", prompt)
+        self.assertNotIn("verifier 的测试用例", prompt)
         self.assertIn("pass / revise / blocked", prompt)
         self.assertIn("reworkTarget=verify", prompt)
 
